@@ -6,6 +6,9 @@
 
 const _PREVIEW_KEY = '__snapclip_preview__';
 
+// Storage-change listeners (so popup.js live-render path works in the preview).
+const _onChangedListeners = [];
+
 // ── Storage (backed by localStorage) ────────────────────────────────────────
 const _store = (() => {
   const load = () => { try { return JSON.parse(localStorage.getItem(_PREVIEW_KEY) || '{}'); } catch { return {}; } };
@@ -21,8 +24,13 @@ const _store = (() => {
     },
     set(data) {
       const d = load();
+      const changes = {};
+      for (const k of Object.keys(data)) {
+        changes[k] = { oldValue: d[k], newValue: data[k] };
+      }
       Object.assign(d, data);
       dump(d);
+      _onChangedListeners.forEach(fn => { try { fn(changes, 'local'); } catch { /* ignore */ } });
       return Promise.resolve();
     },
   };
@@ -52,13 +60,22 @@ const SAMPLES = [
   },
 ];
 
+// ── Sample copied texts ──────────────────────────────────────────────────────
+const SAMPLE_TEXTS = [
+  { id: 'text_1', text: 'https://github.com/YuneshSh/snapClip', savedAt: Date.now() - 1000 * 60 * 1 },
+  { id: 'text_2', text: 'npm run dev', savedAt: Date.now() - 1000 * 60 * 9 },
+  { id: 'text_3', text: 'The quick brown fox jumps over the lazy dog. A pangram often used to preview fonts and test copied text of a few lines.', savedAt: Date.now() - 1000 * 60 * 40 },
+  { id: 'text_4', text: 'user@example.com', savedAt: Date.now() - 1000 * 60 * 60 * 5 },
+];
+
 // Seed sample data synchronously so popup.js reads them immediately on first load
 (() => {
   try {
     const d = JSON.parse(localStorage.getItem(_PREVIEW_KEY) || '{}');
-    if (!d._seeded) {
-      d.screenshots = SAMPLES;
-      d.settings = { maxScreenshots: 10 };
+    if (!d._seeded || !d.texts) {
+      d.screenshots = d.screenshots || SAMPLES;
+      d.texts = d.texts || SAMPLE_TEXTS;
+      d.settings = d.settings || { maxScreenshots: 10 };
       d._seeded = true;
       localStorage.setItem(_PREVIEW_KEY, JSON.stringify(d));
     }
@@ -128,9 +145,61 @@ async function bgClearAll() {
   return { success: true };
 }
 
+// ── Text clipboard (mirror of extension/background.js) ───────────────────────
+async function bgGetTexts() {
+  const r = await _store.get('texts');
+  return r.texts || [];
+}
+
+let _textSaveQueue = Promise.resolve();
+function bgSaveText(text) {
+  const run = _textSaveQueue.then(() => _doSaveText(text));
+  _textSaveQueue = run.catch(() => {});
+  return run;
+}
+
+async function _doSaveText(text) {
+  const value = (text || '').trim();
+  if (!value) return { success: false, reason: 'empty' };
+  const settings = await bgGetSettings();
+  const texts = await bgGetTexts();
+  if (texts.length > 0 && texts[0].text === value) {
+    return { success: false, reason: 'duplicate' };
+  }
+  const entry = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    text: value,
+    savedAt: Date.now(),
+  };
+  texts.unshift(entry);
+  if (texts.length > settings.maxScreenshots) texts.splice(settings.maxScreenshots);
+  await _store.set({ texts });
+  return { success: true, id: entry.id, entry };
+}
+
+async function bgDeleteText(id) {
+  const texts = await bgGetTexts();
+  await _store.set({ texts: texts.filter(t => t.id !== id) });
+  return { success: true };
+}
+
+async function bgClearTexts() {
+  await _store.set({ texts: [] });
+  return { success: true };
+}
+
 // ── chrome global ────────────────────────────────────────────────────────────
 window.chrome = {
-  storage: { local: _store },
+  storage: {
+    local: _store,
+    onChanged: {
+      addListener(fn) { _onChangedListeners.push(fn); },
+      removeListener(fn) {
+        const i = _onChangedListeners.indexOf(fn);
+        if (i !== -1) _onChangedListeners.splice(i, 1);
+      },
+    },
+  },
   runtime: {
     sendMessage(msg) {
       switch (msg.type) {
@@ -140,6 +209,10 @@ window.chrome = {
         case 'SAVE_SCREENSHOT':   return bgSaveScreenshot(msg.dataUrl);
         case 'DELETE_SCREENSHOT': return bgDeleteScreenshot(msg.id);
         case 'CLEAR_ALL':         return bgClearAll();
+        case 'GET_TEXTS':         return bgGetTexts();
+        case 'SAVE_TEXT':         return bgSaveText(msg.text);
+        case 'DELETE_TEXT':       return bgDeleteText(msg.id);
+        case 'CLEAR_TEXTS':       return bgClearTexts();
         // Preview showcases the companion as connected.
         case 'GET_NATIVE_STATUS': return Promise.resolve({ connected: true });
         default: return Promise.resolve(null);

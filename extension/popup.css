@@ -276,6 +276,42 @@ body {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ── Tabs ── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  position: relative;
+  transition: color var(--transition), background var(--transition);
+}
+.tab svg { width: 15px; height: 15px; }
+.tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+.tab.active { color: var(--accent-400); }
+.tab.active::after {
+  content: '';
+  position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px;
+  background: var(--accent-500);
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Panels */
+.panel[hidden] { display: none; }
+
 /* ── Main / Grid ── */
 .main {
   flex: 1;
@@ -382,10 +418,14 @@ body {
   font-size: 10.5px; font-weight: 500;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   padding: 3px 6px 3px 4px;
   border-radius: 99px;
+  min-width: 0;
   transition: background var(--transition), color var(--transition);
 }
+.card-time .time-text { white-space: nowrap; }
+.card-actions { flex-shrink: 0; }
 .card-time .time-eye { width: 12px; height: 12px; opacity: 0.7; transition: opacity var(--transition); }
 .card-time:hover { background: rgba(56, 189, 248, 0.12); color: var(--accent-400); }
 .card-time:hover .time-eye { opacity: 1; }
@@ -412,6 +452,83 @@ body {
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 .card.entering { animation: cardIn 200ms ease forwards; }
+
+/* ── Text list ── */
+.text-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text-item {
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
+}
+.text-item:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.text-body {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: copy;
+  padding: 10px 11px 8px;
+  position: relative;
+}
+
+.text-content {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  font-family: 'SFMono-Regular', ui-monospace, 'Menlo', monospace;
+}
+
+.text-copy-hint {
+  position: absolute;
+  top: 7px; right: 7px;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px;
+  border-radius: 99px;
+  background: rgba(13, 15, 20, 0.72);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 10px; font-weight: 600;
+  opacity: 0;
+  transition: opacity var(--transition);
+  pointer-events: none;
+}
+.text-copy-hint svg { width: 11px; height: 11px; }
+.text-body:hover .text-copy-hint { opacity: 1; }
+
+.text-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 6px 5px 11px;
+  border-top: 1px solid var(--border);
+}
+.text-time {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.text-delete-btn:hover { background: rgba(239, 68, 68, 0.16); color: var(--red-400); }
+
+.text-item.entering { animation: cardIn 200ms ease forwards; }
 
 /* ── Lightbox / Preview ── */
 .lightbox {

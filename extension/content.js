@@ -16,6 +16,7 @@ const SECURE = window.isSecureContext; // clipboard read only works on https/sec
 // Cheap signature (type + byte size) of the last image we captured, so repeated
 // polls don't re-decode and re-save the same clipboard image.
 let lastSignature = null;
+let lastText = null;
 let capturing = false;
 
 async function captureClipboardImage() {
@@ -47,8 +48,38 @@ async function captureClipboardImage() {
   }
 }
 
-// 1) In-page copies (e.g. right-click → "Copy image", or Ctrl+C on an image).
-document.addEventListener('copy', () => setTimeout(captureClipboardImage, 50));
+// Capture copied text. The `copy` event exposes the selection with no clipboard
+// permission needed, which is the most reliable in-page path.
+function captureSelectionText() {
+  try {
+    const sel = document.getSelection && document.getSelection().toString();
+    saveTextIfNew(sel);
+  } catch { /* ignore */ }
+}
+
+// Fallback: read text from the clipboard directly (covers programmatic copies
+// and copies that don't go through a selection), only while focused.
+async function captureClipboardText() {
+  if (!SECURE || !document.hasFocus() || !navigator.clipboard || !navigator.clipboard.readText) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    saveTextIfNew(text);
+  } catch { /* not focused / denied / no text — ignore */ }
+}
+
+function saveTextIfNew(text) {
+  const value = (text || '').trim();
+  if (!value || value === lastText) return;
+  lastText = value;
+  chrome.runtime.sendMessage({ type: 'SAVE_TEXT', text: value });
+}
+
+// 1) In-page copies (e.g. right-click → "Copy image", or Ctrl+C on an image/text).
+document.addEventListener('copy', () => {
+  captureSelectionText();
+  setTimeout(captureClipboardImage, 50);
+  setTimeout(captureClipboardText, 50);
+});
 
 // 2) Event-driven clipboard monitoring (Chrome/Edge 144+): fires on every
 //    clipboard change while the tab is focused — instant, no polling cost.
@@ -63,13 +94,14 @@ if (navigator.clipboard && 'onclipboardchange' in navigator.clipboard) {
 setInterval(() => {
   if (document.hasFocus() && document.visibilityState === 'visible') {
     captureClipboardImage();
+    captureClipboardText();
   }
 }, 1000);
 
 // 4) Also check immediately whenever the tab regains focus or becomes visible.
-window.addEventListener('focus', captureClipboardImage);
+window.addEventListener('focus', () => { captureClipboardImage(); captureClipboardText(); });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') captureClipboardImage();
+  if (document.visibilityState === 'visible') { captureClipboardImage(); captureClipboardText(); }
 });
 
 function blobToDataUrl(blob) {

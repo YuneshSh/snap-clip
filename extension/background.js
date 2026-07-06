@@ -70,18 +70,21 @@ function scheduleReconnect(missing) {
 function handleNativeMessage(msg) {
   if (!msg || !msg.type) return;
 
-  if (msg.type === 'image') {
+  // Both images and text arrive chunked (Chrome caps a host message at ~1 MB).
+  if (msg.type === 'image' || msg.type === 'text') {
     let buf = imageBuffers.get(msg.id);
     if (!buf) {
-      buf = { parts: new Array(msg.total).fill(''), total: msg.total };
+      buf = { parts: new Array(msg.total).fill(''), total: msg.total, kind: msg.type };
       imageBuffers.set(msg.id, buf);
     }
     buf.parts[msg.index] = msg.chunk || '';
     if (msg.last || buf.parts.every((p) => p !== '')) {
-      const dataUrl = buf.parts.join('');
+      const payload = buf.parts.join('');
       imageBuffers.delete(msg.id);
-      if (dataUrl.startsWith('data:image/')) {
-        saveScreenshot(dataUrl);
+      if (buf.kind === 'image') {
+        if (payload.startsWith('data:image/')) saveScreenshot(payload);
+      } else {
+        if (payload.trim()) saveText(payload);
       }
     }
     return;
@@ -114,6 +117,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CLEAR_ALL':
       clearAll().then(sendResponse);
       return true;
+    case 'GET_TEXTS':
+      getTexts().then(sendResponse);
+      return true;
+    case 'SAVE_TEXT':
+      saveText(message.text).then(sendResponse);
+      return true;
+    case 'DELETE_TEXT':
+      deleteText(message.id).then(sendResponse);
+      return true;
+    case 'CLEAR_TEXTS':
+      clearTexts().then(sendResponse);
+      return true;
     case 'GET_SETTINGS':
       getSettings().then(sendResponse);
       return true;
@@ -133,11 +148,14 @@ async function getSettings() {
 
 async function saveSettings(settings) {
   await chrome.storage.local.set({ settings });
-  // Trim existing screenshots if new limit is lower
+  // Trim existing lists if the new limit is lower.
   const screenshots = await getScreenshots();
   if (screenshots.length > settings.maxScreenshots) {
-    const trimmed = screenshots.slice(0, settings.maxScreenshots);
-    await chrome.storage.local.set({ screenshots: trimmed });
+    await chrome.storage.local.set({ screenshots: screenshots.slice(0, settings.maxScreenshots) });
+  }
+  const texts = await getTexts();
+  if (texts.length > settings.maxScreenshots) {
+    await chrome.storage.local.set({ texts: texts.slice(0, settings.maxScreenshots) });
   }
   return { success: true };
 }
@@ -192,5 +210,58 @@ async function deleteScreenshot(id) {
 
 async function clearAll() {
   await chrome.storage.local.set({ screenshots: [] });
+  return { success: true };
+}
+
+// ── Text clipboard ──────────────────────────────────────────────────────────
+async function getTexts() {
+  const result = await chrome.storage.local.get('texts');
+  return result.texts || [];
+}
+
+// Serialize text saves for the same reason screenshot saves are serialized.
+let textSaveQueue = Promise.resolve();
+
+function saveText(text) {
+  const run = textSaveQueue.then(() => doSaveText(text));
+  textSaveQueue = run.catch(() => {});
+  return run;
+}
+
+async function doSaveText(text) {
+  const value = (text || '').trim();
+  if (!value) return { success: false, reason: 'empty' };
+
+  const settings = await getSettings();
+  const texts = await getTexts();
+
+  // Skip if identical to the most recent entry.
+  if (texts.length > 0 && texts[0].text === value) {
+    return { success: false, reason: 'duplicate' };
+  }
+
+  const entry = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    text: value,
+    savedAt: Date.now()
+  };
+
+  texts.unshift(entry);
+  if (texts.length > settings.maxScreenshots) {
+    texts.splice(settings.maxScreenshots);
+  }
+
+  await chrome.storage.local.set({ texts });
+  return { success: true, id: entry.id, entry };
+}
+
+async function deleteText(id) {
+  const texts = await getTexts();
+  await chrome.storage.local.set({ texts: texts.filter(t => t.id !== id) });
+  return { success: true };
+}
+
+async function clearTexts() {
+  await chrome.storage.local.set({ texts: [] });
   return { success: true };
 }

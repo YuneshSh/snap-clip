@@ -76,22 +76,49 @@ func currentClipboardPNG() -> Data? {
 
 func sendImage(_ png: Data) {
     let dataUrl = "data:image/png;base64," + png.base64EncodedString()
-    let chars = Array(dataUrl.utf8) // base64 + prefix are all ASCII, 1 byte each.
-    let chunkSize = 512 * 1024
+    // base64 + prefix are all ASCII, so chunking by UTF-8 bytes is safe.
+    sendChunked(type: "image", bytes: Array(dataUrl.utf8), chunkSize: 512 * 1024)
+}
+
+func sendText(_ text: String) {
+    // Chunk by Character (grapheme cluster) so we never split a multi-byte
+    // scalar; each chunk stays valid UTF-8 for JSON encoding.
+    let chars = Array(text)
+    let chunkSize = 100_000
     let total = max(1, (chars.count + chunkSize - 1) / chunkSize)
     var index = 0
     var start = 0
     let id = UUID().uuidString
     while start < chars.count {
         let end = min(start + chunkSize, chars.count)
-        let piece = String(decoding: chars[start..<end], as: UTF8.self)
         sendMessage([
-            "type": "image",
+            "type": "text",
+            "id": id,
+            "index": index,
+            "total": total,
+            "chunk": String(chars[start..<end]),
+            "last": end >= chars.count
+        ])
+        index += 1
+        start = end
+    }
+}
+
+func sendChunked(type: String, bytes: [UInt8], chunkSize: Int) {
+    let total = max(1, (bytes.count + chunkSize - 1) / chunkSize)
+    var index = 0
+    var start = 0
+    let id = UUID().uuidString
+    while start < bytes.count {
+        let end = min(start + chunkSize, bytes.count)
+        let piece = String(decoding: bytes[start..<end], as: UTF8.self)
+        sendMessage([
+            "type": type,
             "id": id,
             "index": index,
             "total": total,
             "chunk": piece,
-            "last": end >= chars.count
+            "last": end >= bytes.count
         ])
         index += 1
         start = end
@@ -115,6 +142,9 @@ while true {
         lastChangeCount = cc
         if let png = currentClipboardPNG() {
             sendImage(png)
+        } else if let text = pb.string(forType: .string),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sendText(text)
         }
     }
     // Heartbeat keeps the MV3 service worker from going idle so the port stays up.

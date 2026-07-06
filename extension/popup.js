@@ -21,24 +21,37 @@ const lightboxBackdrop = $('lightboxBackdrop');
 const lightboxCopy   = $('lightboxCopy');
 const lightboxSave   = $('lightboxSave');
 const statusDot      = $('statusDot');
+const tabSnaps       = $('tabSnaps');
+const tabTexts       = $('tabTexts');
+const snapsPanel     = $('snapsPanel');
+const textsPanel     = $('textsPanel');
+const textList       = $('textList');
+const emptyStateTexts= $('emptyStateTexts');
 
 let screenshots   = [];
+let texts         = [];
 let settings      = { maxScreenshots: 10 };
+let activeTab     = 'snaps';
 let toastTimer    = null;
 let capturing     = false;
 let autoCaptured  = false;
+let lastTextSeen  = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
-  [settings, screenshots] = await Promise.all([
+  [settings, screenshots, texts] = await Promise.all([
     send('GET_SETTINGS'),
-    send('GET_SCREENSHOTS')
+    send('GET_SCREENSHOTS'),
+    send('GET_TEXTS')
   ]);
   maxInput.value = settings.maxScreenshots;
   renderGrid();
+  renderTexts();
+  updateCountBadge();
 
-  // Silently paste the last screenshot from the clipboard on open.
+  // Silently pull the last screenshot / text from the clipboard on open.
   autoCapture();
+  captureTextFromClipboard();
 
   // Reflect the native companion's connection state in the header.
   send('GET_NATIVE_STATUS').then(res => setNativeStatus(res && res.connected));
@@ -48,6 +61,41 @@ let autoCaptured  = false;
 chrome.runtime.onMessage.addListener(msg => {
   if (msg && msg.type === 'NATIVE_STATUS') setNativeStatus(msg.connected);
 });
+
+// Keep the lists in sync whenever storage changes (captures from the native
+// companion, content script, or this popup all flow through here).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.screenshots) {
+    screenshots = changes.screenshots.newValue || [];
+    renderGrid();
+  }
+  if (changes.texts) {
+    texts = changes.texts.newValue || [];
+    renderTexts();
+  }
+  if (changes.screenshots || changes.texts) updateCountBadge();
+});
+
+// ── Tabs ────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  activeTab = tab;
+  const snaps = tab === 'snaps';
+  tabSnaps.classList.toggle('active', snaps);
+  tabTexts.classList.toggle('active', !snaps);
+  tabSnaps.setAttribute('aria-selected', String(snaps));
+  tabTexts.setAttribute('aria-selected', String(!snaps));
+  snapsPanel.hidden = !snaps;
+  textsPanel.hidden = snaps;
+  updateCountBadge();
+}
+tabSnaps.addEventListener('click', () => switchTab('snaps'));
+tabTexts.addEventListener('click', () => switchTab('texts'));
+
+function updateCountBadge() {
+  const n = activeTab === 'snaps' ? screenshots.length : texts.length;
+  countBadge.textContent = `${n} / ${settings.maxScreenshots}`;
+}
 
 function setNativeStatus(connected) {
   if (!statusDot) return;
@@ -92,19 +140,18 @@ saveSettingsBtn.addEventListener('click', async () => {
   maxInput.value = max;
   settings = { maxScreenshots: max };
   await send('SAVE_SETTINGS', { settings });
-  screenshots = await send('GET_SCREENSHOTS');
-  renderGrid();
+  updateCountBadge();
   settingsPanel.classList.remove('open');
   settingsBtn.classList.remove('active');
   showToast('Settings saved');
 });
 
 clearAllBtn.addEventListener('click', async () => {
-  if (!confirm('Delete all saved screenshots?')) return;
-  await send('CLEAR_ALL');
-  screenshots = [];
-  renderGrid();
-  showToast('All screenshots cleared');
+  const isSnaps = activeTab === 'snaps';
+  const label = isSnaps ? 'screenshots' : 'copied texts';
+  if (!confirm(`Delete all saved ${label}?`)) return;
+  await send(isSnaps ? 'CLEAR_ALL' : 'CLEAR_TEXTS');
+  showToast(isSnaps ? 'All screenshots cleared' : 'All texts cleared');
 });
 
 // ── Clipboard capture ──────────────────────────────────────────────────────
@@ -135,8 +182,7 @@ async function captureFromClipboard({ userInitiated }) {
       const result  = await send('SAVE_SCREENSHOT', { dataUrl });
 
       if (result && result.success) {
-        const entry = result.entry || { id: result.id, dataUrl, savedAt: Date.now() };
-        if (!screenshots.some(s => s.id === entry.id)) prependScreenshot(entry);
+        // storage.onChanged renders the new card.
         showToast('Screenshot added from clipboard');
       } else if (result && result.reason === 'duplicate') {
         if (userInitiated) showToast('That screenshot is already saved');
@@ -158,48 +204,28 @@ async function captureFromClipboard({ userInitiated }) {
   }
 }
 
-// ── Render ────────────────────────────────────────────────────────────────
+// ── Render (Snaps) ──────────────────────────────────────────────────────────
 function renderGrid() {
+  // Only newly-arrived items animate in; existing ones stay put on re-render.
+  const known = new Set([...grid.children].map(c => c.dataset.id));
   grid.innerHTML = '';
 
   const hasItems = screenshots.length > 0;
   emptyState.style.display = hasItems ? 'none' : '';
   grid.style.display       = hasItems ? '' : 'none';
 
-  countBadge.textContent = `${screenshots.length} / ${settings.maxScreenshots}`;
-
-  screenshots.forEach((shot, index) => {
-    const card = buildCard(shot);
-    card.style.animationDelay = `${index * 20}ms`;
-    grid.appendChild(card);
+  screenshots.forEach((shot) => {
+    grid.appendChild(buildCard(shot, !known.has(shot.id)));
   });
 }
 
-function prependScreenshot(shot) {
-  screenshots.unshift(shot);
-
-  // Respect the configured cap by dropping the oldest rendered card.
-  if (screenshots.length > settings.maxScreenshots) {
-    screenshots.length = settings.maxScreenshots;
-    if (grid.lastElementChild) grid.lastElementChild.remove();
-  }
-
-  emptyState.style.display = 'none';
-  grid.style.display       = '';
-
-  const card = buildCard(shot);
-  grid.prepend(card);
-
-  countBadge.textContent = `${screenshots.length} / ${settings.maxScreenshots}`;
-}
-
-function buildCard(shot) {
+function buildCard(shot, isNew) {
   const template = document.getElementById('cardTemplate');
   const node     = template.content.cloneNode(true);
   const card     = node.querySelector('.card');
 
   card.dataset.id = shot.id;
-  card.classList.add('entering');
+  if (isNew) card.classList.add('entering');
 
   const img       = card.querySelector('.card-img');
   img.src         = shot.dataUrl;
@@ -232,7 +258,42 @@ function buildCard(shot) {
   return card;
 }
 
-// ── Actions ───────────────────────────────────────────────────────────────
+// ── Render (Texts) ──────────────────────────────────────────────────────────
+function renderTexts() {
+  const known = new Set([...textList.children].map(c => c.dataset.id));
+  textList.innerHTML = '';
+
+  const hasItems = texts.length > 0;
+  emptyStateTexts.style.display = hasItems ? 'none' : '';
+  textList.style.display        = hasItems ? '' : 'none';
+
+  texts.forEach((entry) => {
+    textList.appendChild(buildTextCard(entry, !known.has(entry.id)));
+  });
+}
+
+function buildTextCard(entry, isNew) {
+  const template = document.getElementById('textCardTemplate');
+  const node     = template.content.cloneNode(true);
+  const item     = node.querySelector('.text-item');
+
+  item.dataset.id = entry.id;
+  if (isNew) item.classList.add('entering');
+
+  item.querySelector('.text-content').textContent = entry.text;
+  item.querySelector('.text-time').textContent = formatTime(entry.savedAt);
+
+  item.querySelector('.text-body').addEventListener('click', () => copyText(entry));
+
+  item.querySelector('.text-delete-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    deleteText(entry.id);
+  });
+
+  return item;
+}
+
+// ── Actions (Snaps) ─────────────────────────────────────────────────────────
 async function copyToClipboard(shot) {
   try {
     const res  = await fetch(shot.dataUrl);
@@ -255,26 +316,39 @@ function downloadImage(shot) {
 }
 
 async function deleteScreenshot(id) {
-  await send('DELETE_SCREENSHOT', { id });
-  screenshots = screenshots.filter(s => s.id !== id);
   if (currentShot && currentShot.id === id) closeLightbox();
+  await send('DELETE_SCREENSHOT', { id }); // storage.onChanged re-renders.
+}
 
-  const card = grid.querySelector(`[data-id="${id}"]`);
-  if (card) {
-    card.style.transition = 'opacity 160ms ease, transform 160ms ease';
-    card.style.opacity    = '0';
-    card.style.transform  = 'scale(0.9)';
-    setTimeout(() => { card.remove(); updateEmpty(); }, 160);
+// ── Actions (Texts) ─────────────────────────────────────────────────────────
+async function copyText(entry) {
+  try {
+    await navigator.clipboard.writeText(entry.text);
+    // Don't re-capture what we just wrote back to the clipboard.
+    lastTextSeen = entry.text;
+    showToast('Text copied to clipboard!');
+  } catch {
+    showToast('Copy failed — check clipboard permission');
   }
-
-  countBadge.textContent = `${screenshots.length} / ${settings.maxScreenshots}`;
 }
 
-function updateEmpty() {
-  const hasItems         = grid.children.length > 0;
-  emptyState.style.display = hasItems ? 'none' : '';
-  grid.style.display       = hasItems ? '' : 'none';
+async function deleteText(id) {
+  await send('DELETE_TEXT', { id }); // storage.onChanged re-renders.
 }
+
+// Pull text sitting on the clipboard when the popup opens (covers text copied
+// in another app when no content script / companion saw it).
+async function captureTextFromClipboard() {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return;
+    const text = await navigator.clipboard.readText();
+    const value = (text || '').trim();
+    if (!value || value === lastTextSeen) return;
+    lastTextSeen = value;
+    await send('SAVE_TEXT', { text: value });
+  } catch { /* not focused / denied / no text — ignore */ }
+}
+window.addEventListener('focus', captureTextFromClipboard);
 
 // ── Lightbox / Preview ─────────────────────────────────────────────────────
 let currentShot = null;

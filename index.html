@@ -512,27 +512,60 @@
               <!-- Toast -->
               <div class="toast" id="toast"></div>
 
+              <!-- Tabs -->
+              <nav class="tabs" role="tablist">
+                <button class="tab active" id="tabSnaps" role="tab" aria-selected="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                    <circle cx="12" cy="12" r="3.5"/>
+                    <path d="M7 3v2M17 3v2"/>
+                  </svg>
+                  Snaps
+                </button>
+                <button class="tab" id="tabTexts" role="tab" aria-selected="false">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="4" y1="7" x2="20" y2="7"/>
+                    <line x1="4" y1="12" x2="20" y2="12"/>
+                    <line x1="4" y1="17" x2="14" y2="17"/>
+                  </svg>
+                  Texts
+                </button>
+              </nav>
+
               <!-- Main content -->
               <main class="main" id="main">
-                <div class="empty-state" id="emptyState">
-                  <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/>
-                    <circle cx="12" cy="12" r="4"/>
-                    <path d="M7 3v2M17 3v2M3 7h2M19 7h2"/>
-                  </svg>
-                  <p class="empty-title">No screenshots yet</p>
-                  <p class="empty-sub">Copy a screenshot with any tool, then paste it here.</p>
-                  <button class="btn btn-primary empty-paste-btn" id="emptyPasteBtn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="8" y="2" width="8" height="4" rx="1"/>
-                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-                      <line x1="12" y1="11" x2="12" y2="17"/>
-                      <line x1="9" y1="14" x2="15" y2="14"/>
+                <section class="panel" id="snapsPanel">
+                  <div class="empty-state" id="emptyState">
+                    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/>
+                      <circle cx="12" cy="12" r="4"/>
+                      <path d="M7 3v2M17 3v2M3 7h2M19 7h2"/>
                     </svg>
-                    Paste from clipboard
-                  </button>
-                </div>
-                <div class="grid" id="grid"></div>
+                    <p class="empty-title">No screenshots yet</p>
+                    <p class="empty-sub">Copy a screenshot with any tool, then paste it here.</p>
+                    <button class="btn btn-primary empty-paste-btn" id="emptyPasteBtn">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="8" y="2" width="8" height="4" rx="1"/>
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                        <line x1="12" y1="11" x2="12" y2="17"/>
+                        <line x1="9" y1="14" x2="15" y2="14"/>
+                      </svg>
+                      Paste from clipboard
+                    </button>
+                  </div>
+                  <div class="grid" id="grid"></div>
+                </section>
+
+                <section class="panel" id="textsPanel" hidden>
+                  <div class="empty-state" id="emptyStateTexts">
+                    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M4 6h16M4 11h16M4 16h10"/>
+                    </svg>
+                    <p class="empty-title">No copied text yet</p>
+                    <p class="empty-sub">Copy any text and it will appear here. Click an entry to copy it again.</p>
+                  </div>
+                  <div class="text-list" id="textList"></div>
+                </section>
               </main>
             </div>
 
@@ -581,6 +614,33 @@
                       </svg>
                     </button>
                   </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Text item template -->
+            <template id="textCardTemplate">
+              <div class="text-item" data-id="">
+                <button class="text-body" title="Click to copy">
+                  <p class="text-content"></p>
+                  <span class="text-copy-hint">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2"/>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                    Copy
+                  </span>
+                </button>
+                <div class="text-footer">
+                  <span class="text-time"></span>
+                  <button class="action-btn text-delete-btn" title="Delete">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                      <path d="M10 11v6M14 11v6"/>
+                      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
             </template>
