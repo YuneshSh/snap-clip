@@ -12,17 +12,16 @@ const grid           = $('grid');
 const emptyState     = $('emptyState');
 const toast          = $('toast');
 const clipboardHint  = $('clipboardHint');
+const pasteBtn       = $('pasteBtn');
+const emptyPasteBtn  = $('emptyPasteBtn');
 
 let screenshots = [];
 let settings    = { maxScreenshots: 10 };
 let toastTimer  = null;
+let capturing   = false;
 
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
-  // Kick off the clipboard read immediately so a freshly copied screenshot
-  // surfaces with minimal delay instead of waiting for the initial render.
-  const clipboardPromise = checkClipboard();
-
   [settings, screenshots] = await Promise.all([
     send('GET_SETTINGS'),
     send('GET_SCREENSHOTS')
@@ -30,13 +29,16 @@ let toastTimer  = null;
   maxInput.value = settings.maxScreenshots;
   renderGrid();
 
-  // Merge in a screenshot found on the clipboard (if any) without a full re-render.
-  const entry = await clipboardPromise;
-  if (entry && !screenshots.some(s => s.id === entry.id)) {
-    prependScreenshot(entry);
-    showToast('Screenshot captured from clipboard');
-  }
+  // Best-effort automatic capture. Browsers frequently block clipboard reads
+  // that aren't triggered by a user gesture, so this may fail silently — the
+  // "Paste from clipboard" button and hint banner are the reliable path.
+  captureFromClipboard({ userInitiated: false });
 })();
+
+// ── Manual paste triggers (reliable: a click is a user gesture) ─────────────
+pasteBtn.addEventListener('click', () => captureFromClipboard({ userInitiated: true }));
+emptyPasteBtn.addEventListener('click', () => captureFromClipboard({ userInitiated: true }));
+clipboardHint.addEventListener('click', () => captureFromClipboard({ userInitiated: true }));
 
 // ── Settings toggle ───────────────────────────────────────────────────────
 settingsBtn.addEventListener('click', () => {
@@ -74,27 +76,54 @@ clearAllBtn.addEventListener('click', async () => {
   showToast('All screenshots cleared');
 });
 
-// ── Clipboard check on popup open ─────────────────────────────────────────
-// Returns the newly-saved entry (or null). Runs in parallel with the initial
-// load so a freshly copied screenshot shows up as fast as possible.
-async function checkClipboard() {
+// ── Clipboard capture ──────────────────────────────────────────────────────
+// Reads the clipboard, saves any image found, and updates the UI in place.
+// `userInitiated` distinguishes an explicit click (safe to show feedback and
+// which reliably grants clipboard permission) from the best-effort auto read.
+async function captureFromClipboard({ userInitiated }) {
+  if (capturing) return;
+  capturing = true;
+
   try {
+    if (!navigator.clipboard || !navigator.clipboard.read) {
+      throw new Error('Clipboard API unavailable');
+    }
+
     const items = await navigator.clipboard.read();
+    let imageFound = false;
+
     for (const item of items) {
       const imageType = item.types.find(t => t.startsWith('image/'));
       if (!imageType) continue;
+      imageFound = true;
 
       const blob    = await item.getType(imageType);
       const dataUrl = await blobToDataUrl(blob);
       const result  = await send('SAVE_SCREENSHOT', { dataUrl });
 
-      return result && result.success ? result.entry : null;
+      if (result && result.success) {
+        const entry = result.entry || { id: result.id, dataUrl, savedAt: Date.now() };
+        if (!screenshots.some(s => s.id === entry.id)) prependScreenshot(entry);
+        showToast('Screenshot added from clipboard');
+      } else if (result && result.reason === 'duplicate') {
+        if (userInitiated) showToast('That screenshot is already saved');
+      }
+      break;
     }
-    return null;
+
+    // Success: clipboard is readable, so hide the permission hint.
+    clipboardHint.classList.remove('visible');
+    if (!imageFound && userInitiated) {
+      showToast('No image found on the clipboard');
+    }
   } catch {
-    // Clipboard access denied or no image — show hint
+    // Permission denied, no focus, or no user gesture — surface the actionable hint.
     clipboardHint.classList.add('visible');
-    return null;
+    if (userInitiated) {
+      showToast('Clipboard blocked — allow access and try again');
+    }
+  } finally {
+    capturing = false;
   }
 }
 

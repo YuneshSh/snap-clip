@@ -465,6 +465,14 @@
                 </div>
                 <div class="header-right">
                   <span class="count-badge" id="countBadge">0 / 10</span>
+                  <button class="icon-btn" id="pasteBtn" title="Paste screenshot from clipboard" aria-label="Paste from clipboard">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="8" y="2" width="8" height="4" rx="1"/>
+                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                      <line x1="12" y1="11" x2="12" y2="17"/>
+                      <line x1="9" y1="14" x2="15" y2="14"/>
+                    </svg>
+                  </button>
                   <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <circle cx="12" cy="12" r="3"/>
@@ -497,13 +505,13 @@
                 </div>
               </div>
 
-              <!-- Clipboard Hint Banner -->
-              <div class="hint-banner" id="clipboardHint">
+              <!-- Clipboard Hint Banner (clickable — a click grants clipboard access) -->
+              <button class="hint-banner" id="clipboardHint" type="button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
-                <span>Clipboard access required — click <strong>Allow</strong> if prompted</span>
-              </div>
+                <span>Click here to paste a screenshot from your clipboard</span>
+              </button>
 
               <!-- Toast -->
               <div class="toast" id="toast"></div>
@@ -517,7 +525,16 @@
                     <path d="M7 3v2M17 3v2M3 7h2M19 7h2"/>
                   </svg>
                   <p class="empty-title">No screenshots yet</p>
-                  <p class="empty-sub">Copy a screenshot with any tool and it will appear here automatically.</p>
+                  <p class="empty-sub">Copy a screenshot with any tool, then paste it here.</p>
+                  <button class="btn btn-primary empty-paste-btn" id="emptyPasteBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="8" y="2" width="8" height="4" rx="1"/>
+                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                      <line x1="12" y1="11" x2="12" y2="17"/>
+                      <line x1="9" y1="14" x2="15" y2="14"/>
+                    </svg>
+                    Paste from clipboard
+                  </button>
                 </div>
                 <div class="grid" id="grid"></div>
               </main>

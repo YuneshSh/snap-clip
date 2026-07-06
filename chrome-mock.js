@@ -105,7 +105,7 @@ async function bgSaveScreenshot(dataUrl) {
   shots.unshift(entry);
   if (shots.length > settings.maxScreenshots) shots.splice(settings.maxScreenshots);
   await _store.set({ screenshots: shots });
-  return { success: true, id: entry.id };
+  return { success: true, id: entry.id, entry };
 }
 
 async function bgDeleteScreenshot(id) {
