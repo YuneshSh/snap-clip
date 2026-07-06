@@ -129,6 +129,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CLEAR_TEXTS':
       clearTexts().then(sendResponse);
       return true;
+    case 'GET_BOOKMARKS':
+      getBookmarks().then(sendResponse);
+      return true;
+    case 'DELETE_BOOKMARK':
+      deleteBookmark(message.id).then(sendResponse);
+      return true;
+    case 'TOGGLE_BOOKMARK_PIN':
+      toggleBookmarkPin(message.id).then(sendResponse);
+      return true;
+    case 'CLEAR_BOOKMARKS':
+      clearBookmarks().then(sendResponse);
+      return true;
     case 'GET_SETTINGS':
       getSettings().then(sendResponse);
       return true;
@@ -156,6 +168,11 @@ async function saveSettings(settings) {
   const texts = await getTexts();
   if (texts.length > settings.maxScreenshots) {
     await chrome.storage.local.set({ texts: texts.slice(0, settings.maxScreenshots) });
+  }
+  const bookmarks = await getBookmarks();
+  const trimmedBookmarks = trimBookmarks(bookmarks, settings.maxScreenshots);
+  if (trimmedBookmarks.length !== bookmarks.length) {
+    await chrome.storage.local.set({ bookmarks: trimmedBookmarks });
   }
   return { success: true };
 }
@@ -219,10 +236,20 @@ async function getTexts() {
   return result.texts || [];
 }
 
+// A copied string that is a bare URL is routed to the Bookmarks list instead of
+// the plain-text list.
+function isUrl(s) {
+  const t = (s || '').trim();
+  if (!t || /\s/.test(t)) return false;
+  return /^https?:\/\/\S+$/i.test(t) || /^www\.\S+\.\S+$/i.test(t);
+}
+
 // Serialize text saves for the same reason screenshot saves are serialized.
 let textSaveQueue = Promise.resolve();
 
 function saveText(text) {
+  const value = (text || '').trim();
+  if (isUrl(value)) return saveBookmark(value);
   const run = textSaveQueue.then(() => doSaveText(text));
   textSaveQueue = run.catch(() => {});
   return run;
@@ -263,5 +290,78 @@ async function deleteText(id) {
 
 async function clearTexts() {
   await chrome.storage.local.set({ texts: [] });
+  return { success: true };
+}
+
+// ── Bookmarks (copied URLs) ───────────────────────────────────────────────────
+async function getBookmarks() {
+  const result = await chrome.storage.local.get('bookmarks');
+  return result.bookmarks || [];
+}
+
+// Keep every pinned bookmark, plus the newest `max` unpinned ones.
+function trimBookmarks(bookmarks, max) {
+  let unpinned = 0;
+  return bookmarks.filter(b => {
+    if (b.pinned) return true;
+    unpinned += 1;
+    return unpinned <= max;
+  });
+}
+
+let bookmarkSaveQueue = Promise.resolve();
+
+function saveBookmark(url) {
+  const run = bookmarkSaveQueue.then(() => doSaveBookmark(url));
+  bookmarkSaveQueue = run.catch(() => {});
+  return run;
+}
+
+async function doSaveBookmark(url) {
+  const value = (url || '').trim();
+  if (!value) return { success: false, reason: 'empty' };
+
+  const settings = await getSettings();
+  const bookmarks = await getBookmarks();
+
+  // Dedup by URL: if it already exists, don't add a second copy.
+  if (bookmarks.some(b => b.url === value)) {
+    return { success: false, reason: 'duplicate' };
+  }
+
+  const entry = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    url: value,
+    savedAt: Date.now(),
+    pinned: false
+  };
+
+  bookmarks.unshift(entry);
+  const trimmed = trimBookmarks(bookmarks, settings.maxScreenshots);
+
+  await chrome.storage.local.set({ bookmarks: trimmed });
+  return { success: true, id: entry.id, entry };
+}
+
+async function deleteBookmark(id) {
+  const bookmarks = await getBookmarks();
+  await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.id !== id) });
+  return { success: true };
+}
+
+async function toggleBookmarkPin(id) {
+  const settings = await getSettings();
+  let bookmarks = await getBookmarks();
+  bookmarks = bookmarks.map(b => b.id === id ? { ...b, pinned: !b.pinned } : b);
+  // Unpinning can push the list back over the cap, so re-trim.
+  bookmarks = trimBookmarks(bookmarks, settings.maxScreenshots);
+  await chrome.storage.local.set({ bookmarks });
+  return { success: true };
+}
+
+// Clears only unpinned bookmarks — pinned ones are kept on purpose.
+async function clearBookmarks() {
+  const bookmarks = await getBookmarks();
+  await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.pinned) });
   return { success: true };
 }

@@ -23,13 +23,26 @@ const lightboxSave   = $('lightboxSave');
 const statusDot      = $('statusDot');
 const tabSnaps       = $('tabSnaps');
 const tabTexts       = $('tabTexts');
+const tabLinks       = $('tabLinks');
 const snapsPanel     = $('snapsPanel');
 const textsPanel     = $('textsPanel');
+const linksPanel     = $('linksPanel');
 const textList       = $('textList');
+const linkList       = $('linkList');
 const emptyStateTexts= $('emptyStateTexts');
+const emptyStateLinks= $('emptyStateLinks');
+const calChip        = $('calChip');
+const calChipLabel   = $('calChipLabel');
+const calPanel       = $('calPanel');
+const calPrev        = $('calPrev');
+const calNext        = $('calNext');
+const calTitle       = $('calTitle');
+const calDays        = $('calDays');
+const calToday       = $('calToday');
 
 let screenshots   = [];
 let texts         = [];
+let bookmarks     = [];
 let settings      = { maxScreenshots: 10 };
 let activeTab     = 'snaps';
 let toastTimer    = null;
@@ -39,15 +52,18 @@ let lastTextSeen  = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
-  [settings, screenshots, texts] = await Promise.all([
+  [settings, screenshots, texts, bookmarks] = await Promise.all([
     send('GET_SETTINGS'),
     send('GET_SCREENSHOTS'),
-    send('GET_TEXTS')
+    send('GET_TEXTS'),
+    send('GET_BOOKMARKS')
   ]);
   maxInput.value = settings.maxScreenshots;
   renderGrid();
   renderTexts();
+  renderLinks();
   updateCountBadge();
+  initCalendar();
 
   // Silently pull the last screenshot / text from the clipboard on open.
   autoCapture();
@@ -74,26 +90,38 @@ chrome.storage.onChanged.addListener((changes, area) => {
     texts = changes.texts.newValue || [];
     renderTexts();
   }
-  if (changes.screenshots || changes.texts) updateCountBadge();
+  if (changes.bookmarks) {
+    bookmarks = changes.bookmarks.newValue || [];
+    renderLinks();
+  }
+  if (changes.screenshots || changes.texts || changes.bookmarks) updateCountBadge();
 });
 
 // ── Tabs ────────────────────────────────────────────────────────────────────
+const TABS = {
+  snaps: { btn: tabSnaps, panel: snapsPanel },
+  texts: { btn: tabTexts, panel: textsPanel },
+  links: { btn: tabLinks, panel: linksPanel }
+};
+
 function switchTab(tab) {
   activeTab = tab;
-  const snaps = tab === 'snaps';
-  tabSnaps.classList.toggle('active', snaps);
-  tabTexts.classList.toggle('active', !snaps);
-  tabSnaps.setAttribute('aria-selected', String(snaps));
-  tabTexts.setAttribute('aria-selected', String(!snaps));
-  snapsPanel.hidden = !snaps;
-  textsPanel.hidden = snaps;
+  for (const [name, { btn, panel }] of Object.entries(TABS)) {
+    const on = name === tab;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', String(on));
+    panel.hidden = !on;
+  }
   updateCountBadge();
 }
 tabSnaps.addEventListener('click', () => switchTab('snaps'));
 tabTexts.addEventListener('click', () => switchTab('texts'));
+tabLinks.addEventListener('click', () => switchTab('links'));
 
 function updateCountBadge() {
-  const n = activeTab === 'snaps' ? screenshots.length : texts.length;
+  const n = activeTab === 'snaps' ? screenshots.length
+          : activeTab === 'texts' ? texts.length
+          : bookmarks.length;
   countBadge.textContent = `${n} / ${settings.maxScreenshots}`;
 }
 
@@ -123,6 +151,82 @@ emptyPasteBtn.addEventListener('click', () => captureFromClipboard({ userInitiat
 settingsBtn.addEventListener('click', () => {
   const open = settingsPanel.classList.toggle('open');
   settingsBtn.classList.toggle('active', open);
+  if (open) closeCalendar();
+});
+
+// ── Calendar ────────────────────────────────────────────────────────────────
+let calYear, calMonth;
+
+function initCalendar() {
+  const now = new Date();
+  calYear = now.getFullYear();
+  calMonth = now.getMonth();
+  calChipLabel.textContent =
+    now.toLocaleDateString([], { weekday: 'short' }) + ', ' +
+    now.getDate() + ' ' +
+    now.toLocaleDateString([], { month: 'long' });
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const now = new Date();
+  const first = new Date(calYear, calMonth, 1);
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const startDow = first.getDay();
+
+  calTitle.textContent = first.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  calDays.innerHTML = '';
+
+  for (let i = 0; i < startDow; i++) {
+    const blank = document.createElement('span');
+    blank.className = 'cal-cell empty';
+    calDays.appendChild(blank);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const cell = document.createElement('span');
+    cell.className = 'cal-cell';
+    cell.textContent = d;
+    if (d === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear()) {
+      cell.classList.add('today');
+    }
+    calDays.appendChild(cell);
+  }
+}
+
+function closeCalendar() {
+  calPanel.hidden = true;
+  calChip.classList.remove('active');
+}
+
+calChip.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const willOpen = calPanel.hidden;
+  calPanel.hidden = !willOpen;
+  calChip.classList.toggle('active', willOpen);
+  if (willOpen) {
+    settingsPanel.classList.remove('open');
+    settingsBtn.classList.remove('active');
+    renderCalendar();
+  }
+});
+calPrev.addEventListener('click', () => {
+  if (--calMonth < 0) { calMonth = 11; calYear--; }
+  renderCalendar();
+});
+calNext.addEventListener('click', () => {
+  if (++calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+});
+calToday.addEventListener('click', () => {
+  const n = new Date();
+  calYear = n.getFullYear();
+  calMonth = n.getMonth();
+  renderCalendar();
+});
+document.addEventListener('click', (e) => {
+  if (!calPanel.hidden && !calPanel.contains(e.target) && !calChip.contains(e.target)) {
+    closeCalendar();
+  }
 });
 
 decrementBtn.addEventListener('click', () => {
@@ -147,11 +251,19 @@ saveSettingsBtn.addEventListener('click', async () => {
 });
 
 clearAllBtn.addEventListener('click', async () => {
-  const isSnaps = activeTab === 'snaps';
-  const label = isSnaps ? 'screenshots' : 'copied texts';
-  if (!confirm(`Delete all saved ${label}?`)) return;
-  await send(isSnaps ? 'CLEAR_ALL' : 'CLEAR_TEXTS');
-  showToast(isSnaps ? 'All screenshots cleared' : 'All texts cleared');
+  if (activeTab === 'snaps') {
+    if (!confirm('Delete all saved screenshots?')) return;
+    await send('CLEAR_ALL');
+    showToast('All screenshots cleared');
+  } else if (activeTab === 'texts') {
+    if (!confirm('Delete all saved texts?')) return;
+    await send('CLEAR_TEXTS');
+    showToast('All texts cleared');
+  } else {
+    if (!confirm('Delete all unpinned links? Pinned links are kept.')) return;
+    await send('CLEAR_BOOKMARKS');
+    showToast('Unpinned links cleared');
+  }
 });
 
 // ── Clipboard capture ──────────────────────────────────────────────────────
@@ -293,6 +405,62 @@ function buildTextCard(entry, isNew) {
   return item;
 }
 
+// ── Render (Links / Bookmarks) ────────────────────────────────────────────────
+function renderLinks() {
+  const known = new Set([...linkList.children].map(c => c.dataset.id));
+  linkList.innerHTML = '';
+
+  const hasItems = bookmarks.length > 0;
+  emptyStateLinks.style.display = hasItems ? 'none' : '';
+  linkList.style.display        = hasItems ? '' : 'none';
+
+  // Pinned links float to the top.
+  const ordered = [...bookmarks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  ordered.forEach((entry) => {
+    linkList.appendChild(buildBookmarkCard(entry, !known.has(entry.id)));
+  });
+}
+
+function buildBookmarkCard(entry, isNew) {
+  const template = document.getElementById('bookmarkTemplate');
+  const node     = template.content.cloneNode(true);
+  const item     = node.querySelector('.link-item');
+
+  item.dataset.id = entry.id;
+  if (isNew) item.classList.add('entering');
+  item.classList.toggle('pinned', !!entry.pinned);
+
+  item.querySelector('.link-url').textContent = prettyUrl(entry.url);
+  item.querySelector('.text-time').textContent = formatTime(entry.savedAt);
+
+  const pinBtn = item.querySelector('.link-pin-btn');
+  pinBtn.title = entry.pinned ? 'Unpin' : 'Pin';
+  pinBtn.classList.toggle('active', !!entry.pinned);
+
+  item.querySelector('.link-body').addEventListener('click', () => copyBookmark(entry));
+  pinBtn.addEventListener('click', e => { e.stopPropagation(); toggleBookmarkPin(entry.id); });
+  item.querySelector('.link-open-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    openBookmark(entry);
+  });
+  item.querySelector('.link-delete-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    deleteBookmark(entry.id);
+  });
+
+  return item;
+}
+
+function prettyUrl(url) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url);
+    const path = (u.pathname + u.search).replace(/\/$/, '');
+    return u.hostname.replace(/^www\./, '') + path;
+  } catch {
+    return url;
+  }
+}
+
 // ── Actions (Snaps) ─────────────────────────────────────────────────────────
 async function copyToClipboard(shot) {
   try {
@@ -334,6 +502,30 @@ async function copyText(entry) {
 
 async function deleteText(id) {
   await send('DELETE_TEXT', { id }); // storage.onChanged re-renders.
+}
+
+// ── Actions (Links / Bookmarks) ──────────────────────────────────────────────
+async function copyBookmark(entry) {
+  try {
+    await navigator.clipboard.writeText(entry.url);
+    lastTextSeen = entry.url;
+    showToast('Link copied to clipboard!');
+  } catch {
+    showToast('Copy failed — check clipboard permission');
+  }
+}
+
+function openBookmark(entry) {
+  const url = /^https?:\/\//i.test(entry.url) ? entry.url : 'https://' + entry.url;
+  window.open(url, '_blank', 'noopener');
+}
+
+async function toggleBookmarkPin(id) {
+  await send('TOGGLE_BOOKMARK_PIN', { id }); // storage.onChanged re-renders.
+}
+
+async function deleteBookmark(id) {
+  await send('DELETE_BOOKMARK', { id }); // storage.onChanged re-renders.
 }
 
 // Pull text sitting on the clipboard when the popup opens (covers text copied

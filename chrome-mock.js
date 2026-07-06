@@ -62,19 +62,26 @@ const SAMPLES = [
 
 // ── Sample copied texts ──────────────────────────────────────────────────────
 const SAMPLE_TEXTS = [
-  { id: 'text_1', text: 'https://github.com/YuneshSh/snapClip', savedAt: Date.now() - 1000 * 60 * 1 },
   { id: 'text_2', text: 'npm run dev', savedAt: Date.now() - 1000 * 60 * 9 },
   { id: 'text_3', text: 'The quick brown fox jumps over the lazy dog. A pangram often used to preview fonts and test copied text of a few lines.', savedAt: Date.now() - 1000 * 60 * 40 },
   { id: 'text_4', text: 'user@example.com', savedAt: Date.now() - 1000 * 60 * 60 * 5 },
+];
+
+// ── Sample bookmarks (copied URLs) ────────────────────────────────────────────
+const SAMPLE_BOOKMARKS = [
+  { id: 'bm_1', url: 'https://github.com/YuneshSh/snapClip', savedAt: Date.now() - 1000 * 60 * 3, pinned: true },
+  { id: 'bm_2', url: 'https://developer.chrome.com/docs/extensions', savedAt: Date.now() - 1000 * 60 * 25, pinned: false },
+  { id: 'bm_3', url: 'https://vercel.com/docs', savedAt: Date.now() - 1000 * 60 * 60 * 2, pinned: false },
 ];
 
 // Seed sample data synchronously so popup.js reads them immediately on first load
 (() => {
   try {
     const d = JSON.parse(localStorage.getItem(_PREVIEW_KEY) || '{}');
-    if (!d._seeded || !d.texts) {
+    if (!d._seeded || !d.bookmarks) {
       d.screenshots = d.screenshots || SAMPLES;
       d.texts = d.texts || SAMPLE_TEXTS;
+      d.bookmarks = d.bookmarks || SAMPLE_BOOKMARKS;
       d.settings = d.settings || { maxScreenshots: 10 };
       d._seeded = true;
       localStorage.setItem(_PREVIEW_KEY, JSON.stringify(d));
@@ -151,8 +158,16 @@ async function bgGetTexts() {
   return r.texts || [];
 }
 
+function _isUrl(s) {
+  const t = (s || '').trim();
+  if (!t || /\s/.test(t)) return false;
+  return /^https?:\/\/\S+$/i.test(t) || /^www\.\S+\.\S+$/i.test(t);
+}
+
 let _textSaveQueue = Promise.resolve();
 function bgSaveText(text) {
+  const value = (text || '').trim();
+  if (_isUrl(value)) return bgSaveBookmark(value);
   const run = _textSaveQueue.then(() => _doSaveText(text));
   _textSaveQueue = run.catch(() => {});
   return run;
@@ -188,6 +203,66 @@ async function bgClearTexts() {
   return { success: true };
 }
 
+// ── Bookmarks (mirror of extension/background.js) ────────────────────────────
+async function bgGetBookmarks() {
+  const r = await _store.get('bookmarks');
+  return r.bookmarks || [];
+}
+
+function _trimBookmarks(bookmarks, max) {
+  let unpinned = 0;
+  return bookmarks.filter(b => {
+    if (b.pinned) return true;
+    unpinned += 1;
+    return unpinned <= max;
+  });
+}
+
+let _bookmarkSaveQueue = Promise.resolve();
+function bgSaveBookmark(url) {
+  const run = _bookmarkSaveQueue.then(() => _doSaveBookmark(url));
+  _bookmarkSaveQueue = run.catch(() => {});
+  return run;
+}
+
+async function _doSaveBookmark(url) {
+  const value = (url || '').trim();
+  if (!value) return { success: false, reason: 'empty' };
+  const settings = await bgGetSettings();
+  const bookmarks = await bgGetBookmarks();
+  if (bookmarks.some(b => b.url === value)) return { success: false, reason: 'duplicate' };
+  const entry = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    url: value,
+    savedAt: Date.now(),
+    pinned: false,
+  };
+  bookmarks.unshift(entry);
+  await _store.set({ bookmarks: _trimBookmarks(bookmarks, settings.maxScreenshots) });
+  return { success: true, id: entry.id, entry };
+}
+
+async function bgDeleteBookmark(id) {
+  const bookmarks = await bgGetBookmarks();
+  await _store.set({ bookmarks: bookmarks.filter(b => b.id !== id) });
+  return { success: true };
+}
+
+async function bgToggleBookmarkPin(id) {
+  const settings = await bgGetSettings();
+  let bookmarks = await bgGetBookmarks();
+  bookmarks = bookmarks.map(b => b.id === id ? { ...b, pinned: !b.pinned } : b);
+  bookmarks = _trimBookmarks(bookmarks, settings.maxScreenshots);
+  await _store.set({ bookmarks });
+  return { success: true };
+}
+
+async function bgClearBookmarks() {
+  const bookmarks = await bgGetBookmarks();
+  await _store.set({ bookmarks: bookmarks.filter(b => b.pinned) });
+  return { success: true };
+}
+
 // ── chrome global ────────────────────────────────────────────────────────────
 window.chrome = {
   storage: {
@@ -213,6 +288,10 @@ window.chrome = {
         case 'SAVE_TEXT':         return bgSaveText(msg.text);
         case 'DELETE_TEXT':       return bgDeleteText(msg.id);
         case 'CLEAR_TEXTS':       return bgClearTexts();
+        case 'GET_BOOKMARKS':     return bgGetBookmarks();
+        case 'DELETE_BOOKMARK':   return bgDeleteBookmark(msg.id);
+        case 'TOGGLE_BOOKMARK_PIN': return bgToggleBookmarkPin(msg.id);
+        case 'CLEAR_BOOKMARKS':   return bgClearBookmarks();
         // Preview showcases the companion as connected.
         case 'GET_NATIVE_STATUS': return Promise.resolve({ connected: true });
         default: return Promise.resolve(null);
