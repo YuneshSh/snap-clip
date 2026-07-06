@@ -214,7 +214,7 @@ async function bgDeleteText(id) {
 async function bgToggleTextPin(id) {
   const settings = await bgGetSettings();
   let texts = await bgGetTexts();
-  texts = texts.map(t => t.id === id ? { ...t, pinned: !t.pinned } : t);
+  texts = texts.map(t => t.id === id ? { ...t, pinned: !Boolean(t.pinned) } : t);
   texts = _trimPinAware(texts, settings.maxScreenshots);
   await _store.set({ texts });
   return { success: true };

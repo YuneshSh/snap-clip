@@ -304,7 +304,7 @@ async function deleteText(id) {
 async function toggleTextPin(id) {
   const settings = await getSettings();
   let texts = await getTexts();
-  texts = texts.map(t => t.id === id ? { ...t, pinned: !t.pinned } : t);
+  texts = texts.map(t => t.id === id ? { ...t, pinned: !Boolean(t.pinned) } : t);
   texts = trimPinAware(texts, settings.maxScreenshots);
   await chrome.storage.local.set({ texts });
   return { success: true };

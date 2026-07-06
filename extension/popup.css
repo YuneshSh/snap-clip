@@ -65,6 +65,7 @@ body {
 }
 
 .app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -194,6 +195,10 @@ body {
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
 }
+.cal-days {
+  min-height: 156px;
+  margin-bottom: 4px;
+}
 .cal-weekdays {
   margin-bottom: 4px;
 }
@@ -208,6 +213,7 @@ body {
 .cal-cell {
   position: relative;
   display: flex; align-items: center; justify-content: center;
+  min-height: 26px;
   aspect-ratio: 1 / 1;
   font-size: 11.5px;
   color: var(--text-muted);
@@ -218,6 +224,8 @@ body {
   font-family: inherit;
   cursor: pointer;
   transition: background var(--transition), color var(--transition);
+  -webkit-appearance: none;
+  appearance: none;
 }
 button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 .cal-cell.empty { visibility: hidden; pointer-events: none; }
@@ -900,6 +908,12 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   overflow-y: auto;
 }
 .pinned-list[hidden] { display: none; }
+.pinned-empty {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  padding: 8px 2px 4px;
+  line-height: 1.5;
+}
 .pinned-list .text-item.pinned,
 .pinned-list .link-item.pinned { margin: 0; }
 

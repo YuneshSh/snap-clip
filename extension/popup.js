@@ -56,9 +56,8 @@ let screenshots   = [];
 let texts         = [];
 let bookmarks     = [];
 let notes         = [];
-let settings      = { maxScreenshots: 10 };
+let settings      = { maxScreenshots: 10, theme: 'ocean' };
 let activeTab     = 'snaps';
-let selectedDate  = null;
 let pinnedExpanded= false;
 let toastTimer    = null;
 let capturing     = false;
@@ -74,6 +73,9 @@ let lastTextSeen  = null;
     send('GET_BOOKMARKS'),
     send('GET_NOTES')
   ]);
+  notes = notes || [];
+  texts = (texts || []).map(t => ({ pinned: false, ...t }));
+  bookmarks = (bookmarks || []).map(b => ({ pinned: false, ...b }));
   maxInput.value = settings.maxScreenshots;
   applyTheme(settings.theme);
   renderGrid();
@@ -106,11 +108,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderGrid();
   }
   if (changes.texts) {
-    texts = changes.texts.newValue || [];
+    texts = (changes.texts.newValue || []).map(t => ({ pinned: false, ...t }));
     renderTexts();
   }
   if (changes.bookmarks) {
-    bookmarks = changes.bookmarks.newValue || [];
+    bookmarks = (changes.bookmarks.newValue || []).map(b => ({ pinned: false, ...b }));
     renderLinks();
   }
   if (changes.notes) {
@@ -183,10 +185,27 @@ settingsBtn.addEventListener('click', () => {
 });
 
 // ── Calendar ────────────────────────────────────────────────────────────────
-let calYear, calMonth;
-
 function dateKey(y, m, d) {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// Initialise synchronously so the grid renders even if the popup opens before
+// the async storage fetch finishes (avoids an empty month with no date cells).
+const _bootNow = new Date();
+let calYear = _bootNow.getFullYear();
+let calMonth = _bootNow.getMonth();
+let selectedDate = dateKey(_bootNow.getFullYear(), _bootNow.getMonth(), _bootNow.getDate());
+
+function ensureCalState() {
+  if (!Number.isFinite(calYear) || !Number.isFinite(calMonth)) {
+    const now = new Date();
+    calYear = now.getFullYear();
+    calMonth = now.getMonth();
+  }
+  if (!selectedDate) {
+    const now = new Date();
+    selectedDate = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+  }
 }
 
 function initCalendar() {
@@ -194,20 +213,25 @@ function initCalendar() {
   calYear = now.getFullYear();
   calMonth = now.getMonth();
   selectedDate = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
-  calChipLabel.textContent =
-    now.toLocaleDateString([], { weekday: 'short' }) + ', ' +
-    now.getDate() + ' ' +
-    now.toLocaleDateString([], { month: 'long' });
+  if (calChipLabel) {
+    calChipLabel.textContent =
+      now.toLocaleDateString([], { weekday: 'short' }) + ', ' +
+      now.getDate() + ' ' +
+      now.toLocaleDateString([], { month: 'long' });
+  }
   renderCalendar();
   renderCalNotes();
 }
 
 function renderCalendar() {
+  if (!calDays || !calTitle) return;
+  ensureCalState();
+
   const now = new Date();
   const first = new Date(calYear, calMonth, 1);
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const startDow = first.getDay();
-  const noteDates = new Set(notes.map(n => n.date));
+  const noteDates = new Set((notes || []).map(n => n.date));
 
   calTitle.textContent = first.toLocaleDateString([], { month: 'long', year: 'numeric' });
   calDays.innerHTML = '';
@@ -250,7 +274,7 @@ function renderCalNotes() {
   const dateObj = new Date(y, m - 1, d);
   calNotesDate.textContent = dateObj.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'long' });
 
-  const dayNotes = notes.filter(n => n.date === selectedDate);
+  const dayNotes = (notes || []).filter(n => n.date === selectedDate);
   calNotesList.innerHTML = '';
 
   if (dayNotes.length === 0) {
@@ -285,10 +309,18 @@ function renderCalNotes() {
 }
 
 async function addNoteForSelected() {
+  ensureCalState();
   const text = (calNoteInput.value || '').trim();
   if (!selectedDate || !text) return;
   calNoteInput.value = '';
-  await send('ADD_NOTE', { date: selectedDate, text }); // storage.onChanged re-renders.
+  const res = await send('ADD_NOTE', { date: selectedDate, text });
+  // Update locally immediately (storage.onChanged may lag slightly).
+  if (res && res.success && res.entry && !(notes || []).some(n => n.id === res.entry.id)) {
+    notes = [...(notes || []), res.entry];
+    renderCalendar();
+    renderCalNotes();
+    renderTicker();
+  }
 }
 
 async function deleteNote(id) {
@@ -303,9 +335,11 @@ calNoteInput.addEventListener('keydown', e => {
 
 // ── Today's reminders ticker ──────────────────────────────────────────────────
 function renderTicker() {
+  if (!ticker || !tickerTrack) return;
+
   const now = new Date();
   const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
-  const todays = notes.filter(n => n.date === todayKey);
+  const todays = (notes || []).filter(n => n.date === todayKey);
 
   if (todays.length === 0) {
     ticker.hidden = true;
@@ -313,6 +347,7 @@ function renderTicker() {
     return;
   }
   ticker.hidden = false;
+  ticker.removeAttribute('hidden');
 
   const sentence = todays.map(n => n.text).join('     \u2022     ') + '     \u2022     ';
   tickerTrack.innerHTML = '';
@@ -346,14 +381,14 @@ if (ticker) {
 
 // ── Pinned drawer (Texts / Links) ─────────────────────────────────────────────
 function updatePinnedDrawer() {
+  if (!pinnedDrawer) return;
   if (activeTab === 'snaps') { pinnedDrawer.hidden = true; return; }
 
   const isTexts = activeTab === 'texts';
-  const items = (isTexts ? texts : bookmarks).filter(i => i.pinned);
-
-  if (items.length === 0) { pinnedDrawer.hidden = true; return; }
+  const items = (isTexts ? texts : bookmarks).filter(i => !!i.pinned);
 
   pinnedDrawer.hidden = false;
+  pinnedDrawer.removeAttribute('hidden');
   pinnedTitle.textContent = isTexts ? 'Pinned texts' : 'Pinned links';
   pinnedCount.textContent = items.length;
   pinnedDrawer.classList.toggle('open', pinnedExpanded);
@@ -362,9 +397,18 @@ function updatePinnedDrawer() {
 
   if (pinnedExpanded) {
     pinnedList.innerHTML = '';
-    items.forEach(entry => {
-      pinnedList.appendChild(isTexts ? buildTextCard(entry, false) : buildBookmarkCard(entry, false));
-    });
+    if (items.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'pinned-empty';
+      empty.textContent = isTexts
+        ? 'No pinned texts yet — tap the pin icon on any text.'
+        : 'No pinned links yet — tap the pin icon on any link.';
+      pinnedList.appendChild(empty);
+    } else {
+      items.forEach(entry => {
+        pinnedList.appendChild(isTexts ? buildTextCard(entry, false) : buildBookmarkCard(entry, false));
+      });
+    }
   }
 }
 
@@ -386,7 +430,9 @@ calChip.addEventListener('click', (e) => {
   if (willOpen) {
     settingsPanel.classList.remove('open');
     settingsBtn.classList.remove('active');
+    ensureCalState();
     renderCalendar();
+    renderCalNotes();
   }
 });
 calPrev.addEventListener('click', () => {
@@ -720,7 +766,8 @@ async function deleteText(id) {
 }
 
 async function toggleTextPin(id) {
-  await send('TOGGLE_TEXT_PIN', { id }); // storage.onChanged re-renders.
+  await send('TOGGLE_TEXT_PIN', { id });
+  updatePinnedDrawer();
 }
 
 // ── Actions (Links / Bookmarks) ──────────────────────────────────────────────
@@ -819,3 +866,6 @@ function formatTime(ts) {
   }
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
 }
+
+// Paint the month grid immediately — don't wait for the async storage fetch.
+renderCalendar();
