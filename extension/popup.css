@@ -80,6 +80,32 @@ body {
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
 }
 
+/* Companion (native host) connection indicator */
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-dim);
+  position: relative;
+  transition: background var(--transition), box-shadow var(--transition);
+}
+.status-dot.connected {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+.status-dot.connected::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: dotPulse 2s ease-out infinite;
+}
+@keyframes dotPulse {
+  0%   { transform: scale(1); opacity: 0.6; }
+  70%  { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
 .header-right { display: flex; align-items: center; gap: 8px; }
 
 .count-badge {
@@ -277,75 +303,94 @@ body {
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 14px;
 }
 
-/* ── Card ── */
+/* ── Card (framed photo look) ── */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 6px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
 }
 .card:hover {
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
-  border-color: rgba(56, 189, 248, 0.35);
+  border-color: rgba(56, 189, 248, 0.45);
 }
 
+/* The image sits inside a recessed mat, giving a clear frame around each shot. */
 .card-img-wrap {
   position: relative;
+  display: block;
+  width: 100%;
   aspect-ratio: 16 / 10;
-  background: var(--surface-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   overflow: hidden;
+  padding: 0;
+  cursor: zoom-in;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .card-img {
   width: 100%; height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform var(--transition);
 }
+.card-img-wrap:hover .card-img { transform: scale(1.04); }
 
 .card-overlay {
   position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(10,12,16,0.2), rgba(10,12,16,0.65));
+  background: linear-gradient(180deg, rgba(10,12,16,0.05), rgba(10,12,16,0.6));
   display: flex; align-items: center; justify-content: center;
   opacity: 0;
   transition: opacity var(--transition);
 }
 .card-img-wrap:hover .card-overlay { opacity: 1; }
 
-.overlay-btn {
+.overlay-hint {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 14px;
-  background: linear-gradient(180deg, var(--accent-500), var(--accent-600));
+  padding: 6px 12px;
+  background: rgba(13, 15, 20, 0.72);
+  backdrop-filter: blur(4px);
   color: #fff;
-  border: none; border-radius: 99px;
-  font-size: 12px; font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(30, 157, 241, 0.45);
-  transition: transform 80ms ease, filter var(--transition);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  transform: translateY(4px);
+  transition: transform var(--transition);
 }
-.overlay-btn svg { width: 13px; height: 13px; }
-.overlay-btn:hover { filter: brightness(1.1); }
-.overlay-btn:active { transform: scale(0.96); }
+.card-img-wrap:hover .overlay-hint { transform: translateY(0); }
+.overlay-hint svg { width: 12px; height: 12px; }
 
 .card-footer {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 10px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
+  gap: 6px;
+  padding: 7px 4px 3px;
 }
 
+/* Time doubles as the View trigger. */
 .card-time {
-  font-size: 10px;
+  display: inline-flex; align-items: center; gap: 5px;
+  border: none; background: transparent; cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px; font-weight: 500;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+  padding: 3px 6px 3px 4px;
+  border-radius: 99px;
+  transition: background var(--transition), color var(--transition);
 }
+.card-time .time-eye { width: 12px; height: 12px; opacity: 0.7; transition: opacity var(--transition); }
+.card-time:hover { background: rgba(56, 189, 248, 0.12); color: var(--accent-400); }
+.card-time:hover .time-eye { opacity: 1; }
 
-.card-actions { display: flex; align-items: center; gap: 2px; }
+.card-actions { display: flex; align-items: center; gap: 1px; }
 
 .action-btn {
   width: 26px; height: 26px;
@@ -357,6 +402,7 @@ body {
   transition: background var(--transition), color var(--transition);
 }
 .action-btn svg { width: 13px; height: 13px; }
+.action-btn.copy-btn:hover { background: rgba(56, 189, 248, 0.14); color: var(--accent-400); }
 .action-btn.save-btn:hover { background: rgba(56, 189, 248, 0.14); color: var(--accent-400); }
 .action-btn.delete-btn:hover { background: rgba(239, 68, 68, 0.16); color: var(--red-400); }
 
@@ -366,3 +412,79 @@ body {
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 .card.entering { animation: cardIn 200ms ease forwards; }
+
+/* ── Lightbox / Preview ── */
+.lightbox {
+  position: fixed; inset: 0;
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 200;
+}
+.lightbox.open { display: flex; }
+
+.lightbox-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(6, 8, 12, 0.82);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 160ms ease;
+}
+
+.lightbox-panel {
+  position: relative;
+  display: flex; flex-direction: column;
+  width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  animation: popIn 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.lightbox-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.lightbox-time {
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lightbox-bar-actions { display: flex; align-items: center; gap: 2px; }
+
+.lightbox-btn {
+  width: 30px; height: 30px;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+.lightbox-btn svg { width: 16px; height: 16px; }
+.lightbox-btn:hover { background: var(--surface-2); color: var(--text); }
+.lightbox-close:hover { background: rgba(239, 68, 68, 0.16); color: var(--red-400); }
+
+.lightbox-imgwrap {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px;
+  background:
+    repeating-conic-gradient(rgba(255,255,255,0.02) 0% 25%, transparent 0% 50%) 50% / 20px 20px,
+    var(--bg-2);
+  overflow: auto;
+}
+.lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}

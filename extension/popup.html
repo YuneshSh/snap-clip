@@ -12,6 +12,7 @@
     <header class="header">
       <div class="header-left">
         <img class="logo-img" src="icons/logo-wordmark.png" alt="SnapClip" />
+        <span class="status-dot" id="statusDot" title="Companion: connecting…" aria-label="Companion status"></span>
       </div>
       <div class="header-right">
         <span class="count-badge" id="countBadge">0 / 10</span>
@@ -88,22 +89,33 @@
   <!-- Card template -->
   <template id="cardTemplate">
     <div class="card" data-id="">
-      <div class="card-img-wrap">
+      <button class="card-img-wrap view-trigger" title="Click to view">
         <img class="card-img" alt="Screenshot" />
-        <div class="card-overlay">
-          <button class="overlay-btn copy-btn" title="Copy to clipboard">
+        <span class="card-overlay">
+          <span class="overlay-hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 3h6v6M14 10l7-7M9 21H3v-6M10 14l-7 7"/>
+            </svg>
+            View
+          </span>
+        </span>
+      </button>
+      <div class="card-footer">
+        <button class="card-time view-trigger" title="View screenshot">
+          <svg class="time-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <span class="time-text"></span>
+        </button>
+        <div class="card-actions">
+          <button class="action-btn copy-btn" title="Copy to clipboard">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2"/>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
-            Copy
           </button>
-        </div>
-      </div>
-      <div class="card-footer">
-        <span class="card-time"></span>
-        <div class="card-actions">
-          <button class="action-btn save-btn" title="Save image">
+          <button class="action-btn save-btn" title="Download image">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
@@ -122,6 +134,39 @@
       </div>
     </div>
   </template>
+
+  <!-- Lightbox / preview -->
+  <div class="lightbox" id="lightbox" aria-hidden="true">
+    <div class="lightbox-backdrop" id="lightboxBackdrop"></div>
+    <div class="lightbox-panel" role="dialog" aria-modal="true" aria-label="Screenshot preview">
+      <div class="lightbox-bar">
+        <span class="lightbox-time" id="lightboxTime"></span>
+        <div class="lightbox-bar-actions">
+          <button class="lightbox-btn" id="lightboxCopy" title="Copy to clipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+          <button class="lightbox-btn" id="lightboxSave" title="Download image">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+          <button class="lightbox-btn lightbox-close" id="lightboxClose" title="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="lightbox-imgwrap">
+        <img class="lightbox-img" id="lightboxImg" alt="Screenshot preview" />
+      </div>
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

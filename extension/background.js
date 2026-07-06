@@ -10,9 +10,18 @@ const RECONNECT_MIN_MS = 3000;      // host present but dropped -> reconnect fas
 const RECONNECT_MAX_MS = 5 * 60000; // host missing -> back off to avoid spam
 
 let nativePort = null;
+let nativeConnected = false;
 let reconnectDelay = RECONNECT_MIN_MS;
 let reconnectTimer = null;
 const imageBuffers = new Map(); // id -> { parts: string[], total: number }
+
+// Reflect the companion's live state to any open popup (best-effort: the popup
+// may not be open, so ignore "no receiver" errors).
+function setNativeConnected(connected) {
+  if (nativeConnected === connected) return;
+  nativeConnected = connected;
+  chrome.runtime.sendMessage({ type: 'NATIVE_STATUS', connected }).catch(() => {});
+}
 
 function connectNative() {
   if (nativePort) return;
@@ -31,12 +40,14 @@ function connectNative() {
     // Any inbound message means the host is alive; keep reconnects snappy and
     // reset the service-worker idle timer (heartbeats flow every ~20s).
     reconnectDelay = RECONNECT_MIN_MS;
+    setNativeConnected(true);
     handleNativeMessage(msg);
   });
 
   port.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError;
     nativePort = null;
+    setNativeConnected(false);
     imageBuffers.clear();
     // If the host isn't installed, Chrome reports "not found" -> back off hard.
     const missing = err && /not found|forbidden|failed to start/i.test(err.message || '');
@@ -109,6 +120,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'SAVE_SETTINGS':
       saveSettings(message.settings).then(sendResponse);
       return true;
+    case 'GET_NATIVE_STATUS':
+      sendResponse({ connected: nativeConnected });
+      return false;
   }
 });
 

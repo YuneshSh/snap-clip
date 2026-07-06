@@ -13,6 +13,14 @@ const emptyState     = $('emptyState');
 const toast          = $('toast');
 const pasteBtn       = $('pasteBtn');
 const emptyPasteBtn  = $('emptyPasteBtn');
+const lightbox       = $('lightbox');
+const lightboxImg    = $('lightboxImg');
+const lightboxTime   = $('lightboxTime');
+const lightboxClose  = $('lightboxClose');
+const lightboxBackdrop = $('lightboxBackdrop');
+const lightboxCopy   = $('lightboxCopy');
+const lightboxSave   = $('lightboxSave');
+const statusDot      = $('statusDot');
 
 let screenshots   = [];
 let settings      = { maxScreenshots: 10 };
@@ -31,7 +39,23 @@ let autoCaptured  = false;
 
   // Silently paste the last screenshot from the clipboard on open.
   autoCapture();
+
+  // Reflect the native companion's connection state in the header.
+  send('GET_NATIVE_STATUS').then(res => setNativeStatus(res && res.connected));
 })();
+
+// Live updates pushed by the background service worker.
+chrome.runtime.onMessage.addListener(msg => {
+  if (msg && msg.type === 'NATIVE_STATUS') setNativeStatus(msg.connected);
+});
+
+function setNativeStatus(connected) {
+  if (!statusDot) return;
+  statusDot.classList.toggle('connected', !!connected);
+  statusDot.title = connected
+    ? 'Companion connected — capturing screenshots system-wide'
+    : 'Companion not connected — open the popup to capture, or run native-host/install.sh';
+}
 
 // The clipboard read can be rejected if it fires before the popup has focus, so
 // retry silently on focus and after short delays until one read succeeds.
@@ -181,7 +205,14 @@ function buildCard(shot) {
   img.src         = shot.dataUrl;
   img.alt         = 'Screenshot ' + formatTime(shot.savedAt);
 
-  card.querySelector('.card-time').textContent = formatTime(shot.savedAt);
+  card.querySelector('.time-text').textContent = formatTime(shot.savedAt);
+
+  card.querySelectorAll('.view-trigger').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      openLightbox(shot);
+    });
+  });
 
   card.querySelector('.copy-btn').addEventListener('click', e => {
     e.stopPropagation();
@@ -226,6 +257,7 @@ function downloadImage(shot) {
 async function deleteScreenshot(id) {
   await send('DELETE_SCREENSHOT', { id });
   screenshots = screenshots.filter(s => s.id !== id);
+  if (currentShot && currentShot.id === id) closeLightbox();
 
   const card = grid.querySelector(`[data-id="${id}"]`);
   if (card) {
@@ -243,6 +275,32 @@ function updateEmpty() {
   emptyState.style.display = hasItems ? 'none' : '';
   grid.style.display       = hasItems ? '' : 'none';
 }
+
+// ── Lightbox / Preview ─────────────────────────────────────────────────────
+let currentShot = null;
+
+function openLightbox(shot) {
+  currentShot = shot;
+  lightboxImg.src = shot.dataUrl;
+  lightboxTime.textContent = formatTime(shot.savedAt);
+  lightbox.classList.add('open');
+  lightbox.setAttribute('aria-hidden', 'false');
+}
+
+function closeLightbox() {
+  lightbox.classList.remove('open');
+  lightbox.setAttribute('aria-hidden', 'true');
+  currentShot = null;
+  lightboxImg.removeAttribute('src');
+}
+
+lightboxClose.addEventListener('click', closeLightbox);
+lightboxBackdrop.addEventListener('click', closeLightbox);
+lightboxCopy.addEventListener('click', () => { if (currentShot) copyToClipboard(currentShot); });
+lightboxSave.addEventListener('click', () => { if (currentShot) downloadImage(currentShot); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && lightbox.classList.contains('open')) closeLightbox();
+});
 
 // ── Toast ─────────────────────────────────────────────────────────────────
 function showToast(msg) {

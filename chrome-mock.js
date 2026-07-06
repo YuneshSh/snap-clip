@@ -140,9 +140,14 @@ window.chrome = {
         case 'SAVE_SCREENSHOT':   return bgSaveScreenshot(msg.dataUrl);
         case 'DELETE_SCREENSHOT': return bgDeleteScreenshot(msg.id);
         case 'CLEAR_ALL':         return bgClearAll();
+        // Preview showcases the companion as connected.
+        case 'GET_NATIVE_STATUS': return Promise.resolve({ connected: true });
         default: return Promise.resolve(null);
       }
     },
+    // No cross-context messaging in the preview; provide a no-op listener so
+    // popup.js's status-update subscription doesn't throw.
+    onMessage: { addListener() {}, removeListener() {} },
     openOptionsPage() {
       alert('In the real extension this opens a dedicated Settings page.');
     },
