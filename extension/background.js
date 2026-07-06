@@ -66,7 +66,7 @@ async function saveScreenshot(dataUrl) {
   }
 
   await chrome.storage.local.set({ screenshots });
-  return { success: true, id: entry.id };
+  return { success: true, id: entry.id, entry };
 }
 
 async function deleteScreenshot(id) {

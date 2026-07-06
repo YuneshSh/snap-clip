@@ -19,6 +19,10 @@ let toastTimer  = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
+  // Kick off the clipboard read immediately so a freshly copied screenshot
+  // surfaces with minimal delay instead of waiting for the initial render.
+  const clipboardPromise = checkClipboard();
+
   [settings, screenshots] = await Promise.all([
     send('GET_SETTINGS'),
     send('GET_SCREENSHOTS')
@@ -26,8 +30,12 @@ let toastTimer  = null;
   maxInput.value = settings.maxScreenshots;
   renderGrid();
 
-  // Check clipboard for a new screenshot when the popup opens
-  await checkClipboard();
+  // Merge in a screenshot found on the clipboard (if any) without a full re-render.
+  const entry = await clipboardPromise;
+  if (entry && !screenshots.some(s => s.id === entry.id)) {
+    prependScreenshot(entry);
+    showToast('Screenshot captured from clipboard');
+  }
 })();
 
 // ── Settings toggle ───────────────────────────────────────────────────────
@@ -67,6 +75,8 @@ clearAllBtn.addEventListener('click', async () => {
 });
 
 // ── Clipboard check on popup open ─────────────────────────────────────────
+// Returns the newly-saved entry (or null). Runs in parallel with the initial
+// load so a freshly copied screenshot shows up as fast as possible.
 async function checkClipboard() {
   try {
     const items = await navigator.clipboard.read();
@@ -74,20 +84,17 @@ async function checkClipboard() {
       const imageType = item.types.find(t => t.startsWith('image/'));
       if (!imageType) continue;
 
-      const blob     = await item.getType(imageType);
-      const dataUrl  = await blobToDataUrl(blob);
-      const result   = await send('SAVE_SCREENSHOT', { dataUrl });
+      const blob    = await item.getType(imageType);
+      const dataUrl = await blobToDataUrl(blob);
+      const result  = await send('SAVE_SCREENSHOT', { dataUrl });
 
-      if (result.success) {
-        screenshots = await send('GET_SCREENSHOTS');
-        renderGrid();
-        showToast('Screenshot captured from clipboard');
-      }
-      return;
+      return result && result.success ? result.entry : null;
     }
+    return null;
   } catch {
     // Clipboard access denied or no image — show hint
     clipboardHint.classList.add('visible');
+    return null;
   }
 }
 
@@ -106,6 +113,24 @@ function renderGrid() {
     card.style.animationDelay = `${index * 20}ms`;
     grid.appendChild(card);
   });
+}
+
+function prependScreenshot(shot) {
+  screenshots.unshift(shot);
+
+  // Respect the configured cap by dropping the oldest rendered card.
+  if (screenshots.length > settings.maxScreenshots) {
+    screenshots.length = settings.maxScreenshots;
+    if (grid.lastElementChild) grid.lastElementChild.remove();
+  }
+
+  emptyState.style.display = 'none';
+  grid.style.display       = '';
+
+  const card = buildCard(shot);
+  grid.prepend(card);
+
+  countBadge.textContent = `${screenshots.length} / ${settings.maxScreenshots}`;
 }
 
 function buildCard(shot) {
@@ -209,9 +234,9 @@ function formatTime(ts) {
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   if (isToday) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return time;
   }
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
-    ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
 }
