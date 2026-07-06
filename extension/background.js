@@ -126,8 +126,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'DELETE_TEXT':
       deleteText(message.id).then(sendResponse);
       return true;
+    case 'TOGGLE_TEXT_PIN':
+      toggleTextPin(message.id).then(sendResponse);
+      return true;
     case 'CLEAR_TEXTS':
       clearTexts().then(sendResponse);
+      return true;
+    case 'GET_NOTES':
+      getNotes().then(sendResponse);
+      return true;
+    case 'ADD_NOTE':
+      addNote(message.date, message.text).then(sendResponse);
+      return true;
+    case 'DELETE_NOTE':
+      deleteNote(message.id).then(sendResponse);
       return true;
     case 'GET_BOOKMARKS':
       getBookmarks().then(sendResponse);
@@ -166,11 +178,12 @@ async function saveSettings(settings) {
     await chrome.storage.local.set({ screenshots: screenshots.slice(0, settings.maxScreenshots) });
   }
   const texts = await getTexts();
-  if (texts.length > settings.maxScreenshots) {
-    await chrome.storage.local.set({ texts: texts.slice(0, settings.maxScreenshots) });
+  const trimmedTexts = trimPinAware(texts, settings.maxScreenshots);
+  if (trimmedTexts.length !== texts.length) {
+    await chrome.storage.local.set({ texts: trimmedTexts });
   }
   const bookmarks = await getBookmarks();
-  const trimmedBookmarks = trimBookmarks(bookmarks, settings.maxScreenshots);
+  const trimmedBookmarks = trimPinAware(bookmarks, settings.maxScreenshots);
   if (trimmedBookmarks.length !== bookmarks.length) {
     await chrome.storage.local.set({ bookmarks: trimmedBookmarks });
   }
@@ -262,23 +275,23 @@ async function doSaveText(text) {
   const settings = await getSettings();
   const texts = await getTexts();
 
-  // Skip if identical to the most recent entry.
-  if (texts.length > 0 && texts[0].text === value) {
+  // Skip if this text is already saved (pinned or not).
+  if (texts.some(t => t.text === value)) {
     return { success: false, reason: 'duplicate' };
   }
 
   const entry = {
     id: Date.now().toString() + Math.random().toString(36).slice(2),
     text: value,
-    savedAt: Date.now()
+    savedAt: Date.now(),
+    pinned: false
   };
 
   texts.unshift(entry);
-  if (texts.length > settings.maxScreenshots) {
-    texts.splice(settings.maxScreenshots);
-  }
+  // Keep every pinned entry, plus the newest `max` unpinned ones.
+  const trimmed = trimPinAware(texts, settings.maxScreenshots);
 
-  await chrome.storage.local.set({ texts });
+  await chrome.storage.local.set({ texts: trimmed });
   return { success: true, id: entry.id, entry };
 }
 
@@ -288,8 +301,19 @@ async function deleteText(id) {
   return { success: true };
 }
 
+async function toggleTextPin(id) {
+  const settings = await getSettings();
+  let texts = await getTexts();
+  texts = texts.map(t => t.id === id ? { ...t, pinned: !t.pinned } : t);
+  texts = trimPinAware(texts, settings.maxScreenshots);
+  await chrome.storage.local.set({ texts });
+  return { success: true };
+}
+
+// Clears only unpinned texts — pinned ones are kept on purpose.
 async function clearTexts() {
-  await chrome.storage.local.set({ texts: [] });
+  const texts = await getTexts();
+  await chrome.storage.local.set({ texts: texts.filter(t => t.pinned) });
   return { success: true };
 }
 
@@ -300,7 +324,7 @@ async function getBookmarks() {
 }
 
 // Keep every pinned bookmark, plus the newest `max` unpinned ones.
-function trimBookmarks(bookmarks, max) {
+function trimPinAware(bookmarks, max) {
   let unpinned = 0;
   return bookmarks.filter(b => {
     if (b.pinned) return true;
@@ -337,7 +361,7 @@ async function doSaveBookmark(url) {
   };
 
   bookmarks.unshift(entry);
-  const trimmed = trimBookmarks(bookmarks, settings.maxScreenshots);
+  const trimmed = trimPinAware(bookmarks, settings.maxScreenshots);
 
   await chrome.storage.local.set({ bookmarks: trimmed });
   return { success: true, id: entry.id, entry };
@@ -354,7 +378,7 @@ async function toggleBookmarkPin(id) {
   let bookmarks = await getBookmarks();
   bookmarks = bookmarks.map(b => b.id === id ? { ...b, pinned: !b.pinned } : b);
   // Unpinning can push the list back over the cap, so re-trim.
-  bookmarks = trimBookmarks(bookmarks, settings.maxScreenshots);
+  bookmarks = trimPinAware(bookmarks, settings.maxScreenshots);
   await chrome.storage.local.set({ bookmarks });
   return { success: true };
 }
@@ -363,5 +387,41 @@ async function toggleBookmarkPin(id) {
 async function clearBookmarks() {
   const bookmarks = await getBookmarks();
   await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.pinned) });
+  return { success: true };
+}
+
+// ── Calendar notes / reminders ────────────────────────────────────────────────
+// Notes are a flat list: { id, date: 'YYYY-MM-DD', text, createdAt }.
+async function getNotes() {
+  const result = await chrome.storage.local.get('notes');
+  return result.notes || [];
+}
+
+let noteSaveQueue = Promise.resolve();
+
+function addNote(date, text) {
+  const run = noteSaveQueue.then(() => doAddNote(date, text));
+  noteSaveQueue = run.catch(() => {});
+  return run;
+}
+
+async function doAddNote(date, text) {
+  const value = (text || '').trim();
+  if (!date || !value) return { success: false, reason: 'empty' };
+  const notes = await getNotes();
+  const entry = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    date,
+    text: value,
+    createdAt: Date.now()
+  };
+  notes.push(entry);
+  await chrome.storage.local.set({ notes });
+  return { success: true, id: entry.id, entry };
+}
+
+async function deleteNote(id) {
+  const notes = await getNotes();
+  await chrome.storage.local.set({ notes: notes.filter(n => n.id !== id) });
   return { success: true };
 }

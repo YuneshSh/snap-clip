@@ -40,12 +40,26 @@ const calNext        = $('calNext');
 const calTitle       = $('calTitle');
 const calDays        = $('calDays');
 const calToday       = $('calToday');
+const calNotesDate   = $('calNotesDate');
+const calNotesList   = $('calNotesList');
+const calNoteInput   = $('calNoteInput');
+const calNoteAddBtn  = $('calNoteAddBtn');
+const ticker         = $('ticker');
+const tickerTrack    = $('tickerTrack');
+const pinnedDrawer   = $('pinnedDrawer');
+const pinnedToggle   = $('pinnedToggle');
+const pinnedList     = $('pinnedList');
+const pinnedCount    = $('pinnedCount');
+const pinnedTitle    = $('pinnedTitle');
 
 let screenshots   = [];
 let texts         = [];
 let bookmarks     = [];
+let notes         = [];
 let settings      = { maxScreenshots: 10 };
 let activeTab     = 'snaps';
+let selectedDate  = null;
+let pinnedExpanded= false;
 let toastTimer    = null;
 let capturing     = false;
 let autoCaptured  = false;
@@ -53,11 +67,12 @@ let lastTextSeen  = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
-  [settings, screenshots, texts, bookmarks] = await Promise.all([
+  [settings, screenshots, texts, bookmarks, notes] = await Promise.all([
     send('GET_SETTINGS'),
     send('GET_SCREENSHOTS'),
     send('GET_TEXTS'),
-    send('GET_BOOKMARKS')
+    send('GET_BOOKMARKS'),
+    send('GET_NOTES')
   ]);
   maxInput.value = settings.maxScreenshots;
   applyTheme(settings.theme);
@@ -65,7 +80,9 @@ let lastTextSeen  = null;
   renderTexts();
   renderLinks();
   updateCountBadge();
+  updatePinnedDrawer();
   initCalendar();
+  renderTicker();
 
   // Silently pull the last screenshot / text from the clipboard on open.
   autoCapture();
@@ -96,6 +113,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
     bookmarks = changes.bookmarks.newValue || [];
     renderLinks();
   }
+  if (changes.notes) {
+    notes = changes.notes.newValue || [];
+    renderCalendar();
+    renderCalNotes();
+    renderTicker();
+  }
+  if (changes.texts || changes.bookmarks) updatePinnedDrawer();
   if (changes.screenshots || changes.texts || changes.bookmarks) updateCountBadge();
 });
 
@@ -108,6 +132,7 @@ const TABS = {
 
 function switchTab(tab) {
   activeTab = tab;
+  pinnedExpanded = false;
   for (const [name, { btn, panel }] of Object.entries(TABS)) {
     const on = name === tab;
     btn.classList.toggle('active', on);
@@ -115,6 +140,7 @@ function switchTab(tab) {
     panel.hidden = !on;
   }
   updateCountBadge();
+  updatePinnedDrawer();
 }
 tabSnaps.addEventListener('click', () => switchTab('snaps'));
 tabTexts.addEventListener('click', () => switchTab('texts'));
@@ -159,15 +185,21 @@ settingsBtn.addEventListener('click', () => {
 // ── Calendar ────────────────────────────────────────────────────────────────
 let calYear, calMonth;
 
+function dateKey(y, m, d) {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 function initCalendar() {
   const now = new Date();
   calYear = now.getFullYear();
   calMonth = now.getMonth();
+  selectedDate = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
   calChipLabel.textContent =
     now.toLocaleDateString([], { weekday: 'short' }) + ', ' +
     now.getDate() + ' ' +
     now.toLocaleDateString([], { month: 'long' });
   renderCalendar();
+  renderCalNotes();
 }
 
 function renderCalendar() {
@@ -175,6 +207,7 @@ function renderCalendar() {
   const first = new Date(calYear, calMonth, 1);
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   const startDow = first.getDay();
+  const noteDates = new Set(notes.map(n => n.date));
 
   calTitle.textContent = first.toLocaleDateString([], { month: 'long', year: 'numeric' });
   calDays.innerHTML = '';
@@ -185,15 +218,160 @@ function renderCalendar() {
     calDays.appendChild(blank);
   }
   for (let d = 1; d <= daysInMonth; d++) {
-    const cell = document.createElement('span');
+    const key = dateKey(calYear, calMonth, d);
+    const cell = document.createElement('button');
+    cell.type = 'button';
     cell.className = 'cal-cell';
     cell.textContent = d;
     if (d === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear()) {
       cell.classList.add('today');
     }
+    if (key === selectedDate) cell.classList.add('selected');
+    if (noteDates.has(key)) cell.classList.add('has-note');
+    cell.addEventListener('click', () => selectDate(key));
     calDays.appendChild(cell);
   }
 }
+
+function selectDate(key) {
+  selectedDate = key;
+  renderCalendar();
+  renderCalNotes();
+  calNoteInput.focus();
+}
+
+function renderCalNotes() {
+  if (!selectedDate) {
+    calNotesDate.textContent = 'Pick a date';
+    calNotesList.innerHTML = '';
+    return;
+  }
+  const [y, m, d] = selectedDate.split('-').map(Number);
+  const dateObj = new Date(y, m - 1, d);
+  calNotesDate.textContent = dateObj.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'long' });
+
+  const dayNotes = notes.filter(n => n.date === selectedDate);
+  calNotesList.innerHTML = '';
+
+  if (dayNotes.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'cal-notes-empty';
+    empty.textContent = 'No notes for this day yet.';
+    calNotesList.appendChild(empty);
+    return;
+  }
+  dayNotes.forEach(n => {
+    const row = document.createElement('div');
+    row.className = 'cal-note';
+
+    const dot = document.createElement('span');
+    dot.className = 'cal-note-bullet';
+
+    const span = document.createElement('span');
+    span.className = 'cal-note-text';
+    span.textContent = n.text;
+
+    const del = document.createElement('button');
+    del.className = 'cal-note-del';
+    del.title = 'Delete note';
+    del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    del.addEventListener('click', () => deleteNote(n.id));
+
+    row.appendChild(dot);
+    row.appendChild(span);
+    row.appendChild(del);
+    calNotesList.appendChild(row);
+  });
+}
+
+async function addNoteForSelected() {
+  const text = (calNoteInput.value || '').trim();
+  if (!selectedDate || !text) return;
+  calNoteInput.value = '';
+  await send('ADD_NOTE', { date: selectedDate, text }); // storage.onChanged re-renders.
+}
+
+async function deleteNote(id) {
+  await send('DELETE_NOTE', { id }); // storage.onChanged re-renders.
+}
+
+calNoteAddBtn.addEventListener('click', addNoteForSelected);
+calNoteInput.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') addNoteForSelected();
+});
+
+// ── Today's reminders ticker ──────────────────────────────────────────────────
+function renderTicker() {
+  const now = new Date();
+  const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+  const todays = notes.filter(n => n.date === todayKey);
+
+  if (todays.length === 0) {
+    ticker.hidden = true;
+    tickerTrack.innerHTML = '';
+    return;
+  }
+  ticker.hidden = false;
+
+  const sentence = todays.map(n => n.text).join('     \u2022     ') + '     \u2022     ';
+  tickerTrack.innerHTML = '';
+  // Two identical copies so the left→right scroll loops seamlessly.
+  for (let i = 0; i < 2; i++) {
+    const span = document.createElement('span');
+    span.className = 'ticker-item';
+    span.textContent = sentence;
+    tickerTrack.appendChild(span);
+  }
+  const dur = Math.max(14, Math.min(48, sentence.length * 0.45));
+  tickerTrack.style.animationDuration = dur + 's';
+}
+
+// Click the ticker to jump straight to today's notes in the calendar.
+if (ticker) {
+  ticker.addEventListener('click', () => {
+    const now = new Date();
+    calYear = now.getFullYear();
+    calMonth = now.getMonth();
+    selectedDate = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+    settingsPanel.classList.remove('open');
+    settingsBtn.classList.remove('active');
+    calPanel.hidden = false;
+    calChip.classList.add('active');
+    renderCalendar();
+    renderCalNotes();
+    calNoteInput.focus();
+  });
+}
+
+// ── Pinned drawer (Texts / Links) ─────────────────────────────────────────────
+function updatePinnedDrawer() {
+  if (activeTab === 'snaps') { pinnedDrawer.hidden = true; return; }
+
+  const isTexts = activeTab === 'texts';
+  const items = (isTexts ? texts : bookmarks).filter(i => i.pinned);
+
+  if (items.length === 0) { pinnedDrawer.hidden = true; return; }
+
+  pinnedDrawer.hidden = false;
+  pinnedTitle.textContent = isTexts ? 'Pinned texts' : 'Pinned links';
+  pinnedCount.textContent = items.length;
+  pinnedDrawer.classList.toggle('open', pinnedExpanded);
+  pinnedToggle.setAttribute('aria-expanded', String(pinnedExpanded));
+  pinnedList.hidden = !pinnedExpanded;
+
+  if (pinnedExpanded) {
+    pinnedList.innerHTML = '';
+    items.forEach(entry => {
+      pinnedList.appendChild(isTexts ? buildTextCard(entry, false) : buildBookmarkCard(entry, false));
+    });
+  }
+}
+
+pinnedToggle.addEventListener('click', () => {
+  pinnedExpanded = !pinnedExpanded;
+  updatePinnedDrawer();
+});
 
 function closeCalendar() {
   calPanel.hidden = true;
@@ -223,7 +401,9 @@ calToday.addEventListener('click', () => {
   const n = new Date();
   calYear = n.getFullYear();
   calMonth = n.getMonth();
+  selectedDate = dateKey(n.getFullYear(), n.getMonth(), n.getDate());
   renderCalendar();
+  renderCalNotes();
 });
 document.addEventListener('click', (e) => {
   if (!calPanel.hidden && !calPanel.contains(e.target) && !calChip.contains(e.target)) {
@@ -403,11 +583,13 @@ function renderTexts() {
   const known = new Set([...textList.children].map(c => c.dataset.id));
   textList.innerHTML = '';
 
-  const hasItems = texts.length > 0;
-  emptyStateTexts.style.display = hasItems ? 'none' : '';
-  textList.style.display        = hasItems ? '' : 'none';
+  // Pinned entries live in the docked bottom drawer, not the main list.
+  const unpinned = texts.filter(t => !t.pinned);
+  const hasAny = texts.length > 0;
+  emptyStateTexts.style.display = hasAny ? 'none' : '';
+  textList.style.display        = unpinned.length ? '' : 'none';
 
-  texts.forEach((entry) => {
+  unpinned.forEach((entry) => {
     textList.appendChild(buildTextCard(entry, !known.has(entry.id)));
   });
 }
@@ -419,12 +601,17 @@ function buildTextCard(entry, isNew) {
 
   item.dataset.id = entry.id;
   if (isNew) item.classList.add('entering');
+  item.classList.toggle('pinned', !!entry.pinned);
 
   item.querySelector('.text-content').textContent = entry.text;
   item.querySelector('.text-time').textContent = formatTime(entry.savedAt);
 
-  item.querySelector('.text-body').addEventListener('click', () => copyText(entry));
+  const pinBtn = item.querySelector('.text-pin-btn');
+  pinBtn.title = entry.pinned ? 'Unpin' : 'Pin';
+  pinBtn.classList.toggle('active', !!entry.pinned);
 
+  item.querySelector('.text-body').addEventListener('click', () => copyText(entry));
+  pinBtn.addEventListener('click', e => { e.stopPropagation(); toggleTextPin(entry.id); });
   item.querySelector('.text-delete-btn').addEventListener('click', e => {
     e.stopPropagation();
     deleteText(entry.id);
@@ -438,13 +625,13 @@ function renderLinks() {
   const known = new Set([...linkList.children].map(c => c.dataset.id));
   linkList.innerHTML = '';
 
-  const hasItems = bookmarks.length > 0;
-  emptyStateLinks.style.display = hasItems ? 'none' : '';
-  linkList.style.display        = hasItems ? '' : 'none';
+  // Pinned links live in the docked bottom drawer, not the main list.
+  const unpinned = bookmarks.filter(b => !b.pinned);
+  const hasAny = bookmarks.length > 0;
+  emptyStateLinks.style.display = hasAny ? 'none' : '';
+  linkList.style.display        = unpinned.length ? '' : 'none';
 
-  // Pinned links float to the top.
-  const ordered = [...bookmarks].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
-  ordered.forEach((entry) => {
+  unpinned.forEach((entry) => {
     linkList.appendChild(buildBookmarkCard(entry, !known.has(entry.id)));
   });
 }
@@ -530,6 +717,10 @@ async function copyText(entry) {
 
 async function deleteText(id) {
   await send('DELETE_TEXT', { id }); // storage.onChanged re-renders.
+}
+
+async function toggleTextPin(id) {
+  await send('TOGGLE_TEXT_PIN', { id }); // storage.onChanged re-renders.
 }
 
 // ── Actions (Links / Bookmarks) ──────────────────────────────────────────────

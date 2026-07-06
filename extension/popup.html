@@ -40,6 +40,17 @@
       </div>
     </header>
 
+    <!-- Today's reminders ticker -->
+    <div class="ticker" id="ticker" hidden>
+      <svg class="ticker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      <div class="ticker-viewport">
+        <div class="ticker-track" id="tickerTrack"></div>
+      </div>
+    </div>
+
     <!-- Calendar popover -->
     <div class="cal-popover" id="calPanel" hidden>
       <div class="cal-head">
@@ -56,6 +67,18 @@
       </div>
       <div class="cal-days" id="calDays"></div>
       <button class="cal-today" id="calToday">Today</button>
+
+      <!-- Selected-date notes / reminders -->
+      <div class="cal-notes" id="calNotes">
+        <div class="cal-notes-date" id="calNotesDate"></div>
+        <div class="cal-notes-list" id="calNotesList"></div>
+        <div class="cal-note-add">
+          <input type="text" id="calNoteInput" class="cal-note-input" placeholder="Add a note…" maxlength="120" />
+          <button class="cal-note-add-btn" id="calNoteAddBtn" aria-label="Add note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Settings Panel -->
@@ -172,6 +195,19 @@
         <div class="link-list" id="linkList"></div>
       </section>
     </main>
+
+    <!-- Docked, collapsible pinned section (Texts / Links) -->
+    <div class="pinned-drawer" id="pinnedDrawer" hidden>
+      <button class="pinned-toggle" id="pinnedToggle" aria-expanded="false">
+        <svg class="pinned-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
+        <svg class="pinned-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 17v5M9 10.76V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6.76a2 2 0 0 0 .55 1.38l1.6 1.68A1 1 0 0 1 17 15.5H7a1 1 0 0 1-.75-1.68l1.6-1.68A2 2 0 0 0 9 10.76z"/>
+        </svg>
+        <span class="pinned-title" id="pinnedTitle">Pinned</span>
+        <span class="pinned-count" id="pinnedCount">0</span>
+      </button>
+      <div class="pinned-list" id="pinnedList" hidden></div>
+    </div>
   </div>
 
   <!-- Card template -->
@@ -238,14 +274,21 @@
       </button>
       <div class="text-footer">
         <span class="text-time"></span>
-        <button class="action-btn text-delete-btn" title="Delete">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-            <path d="M10 11v6M14 11v6"/>
-            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-          </svg>
-        </button>
+        <div class="text-actions">
+          <button class="action-btn text-pin-btn" title="Pin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 17v5M9 10.76V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6.76a2 2 0 0 0 .55 1.38l1.6 1.68A1 1 0 0 1 17 15.5H7a1 1 0 0 1-.75-1.68l1.6-1.68A2 2 0 0 0 9 10.76z"/>
+            </svg>
+          </button>
+          <button class="action-btn text-delete-btn" title="Delete">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   </template>

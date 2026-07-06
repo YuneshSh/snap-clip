@@ -159,6 +159,8 @@ body {
   position: absolute;
   top: 52px; right: 12px;
   width: 244px;
+  max-height: min(420px, calc(100vh - 64px));
+  overflow-y: auto;
   z-index: 60;
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -204,20 +206,98 @@ body {
   padding: 2px 0;
 }
 .cal-cell {
+  position: relative;
   display: flex; align-items: center; justify-content: center;
   aspect-ratio: 1 / 1;
   font-size: 11.5px;
   color: var(--text-muted);
   border-radius: 7px;
   font-variant-numeric: tabular-nums;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
 }
-.cal-cell.empty { visibility: hidden; }
+button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
+.cal-cell.empty { visibility: hidden; pointer-events: none; }
 .cal-cell.today {
   background: linear-gradient(180deg, var(--accent-500), var(--accent-600));
   color: #fff;
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.4);
 }
+.cal-cell.selected:not(.today) {
+  box-shadow: inset 0 0 0 1.5px var(--accent-500);
+  color: var(--text);
+}
+/* Dot marking a date that has notes/reminders */
+.cal-cell.has-note::after {
+  content: '';
+  position: absolute;
+  bottom: 3px; left: 50%;
+  transform: translateX(-50%);
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--accent-400);
+}
+.cal-cell.today.has-note::after { background: #fff; }
+
+/* Selected-date notes */
+.cal-notes {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.cal-notes-date {
+  font-size: 11.5px; font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.cal-notes-list { display: flex; flex-direction: column; gap: 5px; max-height: 120px; overflow-y: auto; }
+.cal-notes-empty { font-size: 11px; color: var(--text-dim); padding: 2px 0 6px; }
+.cal-note {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+.cal-note-bullet { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-400); flex-shrink: 0; }
+.cal-note-text { flex: 1; font-size: 11.5px; color: var(--text); word-break: break-word; }
+.cal-note-del {
+  width: 18px; height: 18px; flex-shrink: 0;
+  border: none; background: transparent; cursor: pointer;
+  color: var(--text-dim); border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+}
+.cal-note-del svg { width: 12px; height: 12px; }
+.cal-note-del:hover { background: rgba(239, 68, 68, 0.16); color: var(--red-400); }
+
+.cal-note-add { display: flex; gap: 6px; margin-top: 8px; }
+.cal-note-input {
+  flex: 1; min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit; font-size: 11.5px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.cal-note-input:focus { border-color: var(--accent-500); box-shadow: 0 0 0 3px var(--accent-glow); }
+.cal-note-add-btn {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border: none; cursor: pointer;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, var(--accent-500), var(--accent-600));
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.cal-note-add-btn svg { width: 15px; height: 15px; }
+.cal-note-add-btn:hover { filter: brightness(1.08); }
 
 .cal-today {
   width: 100%;
@@ -257,9 +337,9 @@ body {
   transition: max-height 220ms ease, padding 220ms ease;
   flex-shrink: 0;
 }
-.settings-panel.open { max-height: 160px; }
+.settings-panel.open { max-height: 340px; }
 
-.settings-inner { padding: 14px 16px; }
+.settings-inner { padding: 14px 16px 18px; }
 
 .settings-title {
   font-size: 12px;
@@ -362,6 +442,8 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  margin-top: 4px;
+  padding-top: 4px;
 }
 
 /* ── Buttons ── */
@@ -467,6 +549,7 @@ body {
 /* ── Main / Grid ── */
 .main {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
   scrollbar-width: thin;
@@ -734,6 +817,91 @@ body {
 .link-delete-btn:hover { background: rgba(239, 68, 68, 0.16); color: var(--red-400); }
 
 .link-item.entering { animation: cardIn 200ms ease forwards; }
+
+/* ── Text actions (pin + delete) ── */
+.text-actions { display: flex; align-items: center; gap: 1px; }
+.text-pin-btn.active { color: var(--accent-400); background: rgba(var(--accent-rgb), 0.14); }
+.text-pin-btn:hover { background: rgba(var(--accent-rgb), 0.14); color: var(--accent-400); }
+.text-item.pinned {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.08), var(--surface));
+}
+
+/* ── Today's reminders ticker ── */
+.ticker {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px;
+  background: rgba(var(--accent-rgb), 0.09);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
+  cursor: pointer;
+}
+.ticker:hover { background: rgba(var(--accent-rgb), 0.14); }
+.ticker[hidden] { display: none; }
+.ticker-icon { width: 13px; height: 13px; color: var(--accent-400); flex-shrink: 0; }
+.ticker-viewport { position: relative; flex: 1; overflow: hidden; }
+.ticker-track {
+  display: inline-flex;
+  white-space: nowrap;
+  will-change: transform;
+  animation: tickerMove 20s linear infinite;
+}
+.ticker:hover .ticker-track { animation-play-state: paused; }
+.ticker-item { font-size: 11.5px; font-weight: 500; color: var(--text-muted); }
+/* Two identical copies scroll from left to right seamlessly. */
+@keyframes tickerMove {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* ── Pinned drawer (docked, collapsible) ── */
+.pinned-drawer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(8px);
+}
+.pinned-drawer[hidden] { display: none; }
+.pinned-toggle {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 9px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: inherit;
+  transition: color var(--transition), background var(--transition);
+}
+.pinned-toggle:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+.pinned-chevron {
+  width: 15px; height: 15px;
+  transition: transform 200ms ease;
+}
+.pinned-drawer.open .pinned-chevron { transform: rotate(180deg); }
+.pinned-pin { width: 13px; height: 13px; color: var(--accent-400); }
+.pinned-title { font-size: 12px; font-weight: 600; }
+.pinned-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 7px;
+  font-size: 11px; font-weight: 700;
+  color: var(--accent-400);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  border-radius: 99px;
+  text-align: center;
+}
+.pinned-list {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 4px 12px 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.pinned-list[hidden] { display: none; }
+.pinned-list .text-item.pinned,
+.pinned-list .link-item.pinned { margin: 0; }
 
 /* ── Lightbox / Preview ── */
 .lightbox {
