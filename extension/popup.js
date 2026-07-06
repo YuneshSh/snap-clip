@@ -7,6 +7,7 @@ const decrementBtn   = $('decrementBtn');
 const incrementBtn   = $('incrementBtn');
 const saveSettingsBtn= $('saveSettingsBtn');
 const clearAllBtn    = $('clearAllBtn');
+const themeSwatches  = $('themeSwatches');
 const countBadge     = $('countBadge');
 const grid           = $('grid');
 const emptyState     = $('emptyState');
@@ -59,6 +60,7 @@ let lastTextSeen  = null;
     send('GET_BOOKMARKS')
   ]);
   maxInput.value = settings.maxScreenshots;
+  applyTheme(settings.theme);
   renderGrid();
   renderTexts();
   renderLinks();
@@ -242,13 +244,39 @@ incrementBtn.addEventListener('click', () => {
 saveSettingsBtn.addEventListener('click', async () => {
   const max = Math.max(1, Math.min(50, parseInt(maxInput.value, 10) || 10));
   maxInput.value = max;
-  settings = { maxScreenshots: max };
+  settings = { ...settings, maxScreenshots: max };
   await send('SAVE_SETTINGS', { settings });
   updateCountBadge();
   settingsPanel.classList.remove('open');
   settingsBtn.classList.remove('active');
   showToast('Settings saved');
 });
+
+// ── Accent color palettes ─────────────────────────────────────────────────────
+const THEMES = ['ocean', 'violet', 'fuchsia', 'mint', 'sunset', 'coral', 'indigo', 'aurora'];
+
+function applyTheme(theme) {
+  const t = THEMES.includes(theme) ? theme : 'ocean';
+  document.documentElement.dataset.theme = t;
+  if (!themeSwatches) return;
+  themeSwatches.querySelectorAll('.swatch').forEach(s => {
+    const on = s.dataset.theme === t;
+    s.classList.toggle('selected', on);
+    s.setAttribute('aria-checked', String(on));
+  });
+}
+
+if (themeSwatches) {
+  themeSwatches.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.swatch');
+    if (!btn) return;
+    const theme = btn.dataset.theme;
+    settings = { ...settings, theme };
+    applyTheme(theme);
+    await send('SAVE_SETTINGS', { settings });
+    showToast('Accent color updated');
+  });
+}
 
 clearAllBtn.addEventListener('click', async () => {
   if (activeTab === 'snaps') {

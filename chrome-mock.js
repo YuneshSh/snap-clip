@@ -82,7 +82,7 @@ const SAMPLE_BOOKMARKS = [
       d.screenshots = d.screenshots || SAMPLES;
       d.texts = d.texts || SAMPLE_TEXTS;
       d.bookmarks = d.bookmarks || SAMPLE_BOOKMARKS;
-      d.settings = d.settings || { maxScreenshots: 10 };
+      d.settings = d.settings || { maxScreenshots: 10, theme: 'ocean' };
       d._seeded = true;
       localStorage.setItem(_PREVIEW_KEY, JSON.stringify(d));
     }
@@ -90,11 +90,11 @@ const SAMPLE_BOOKMARKS = [
 })();
 
 // ── Background logic (inline mirror of extension/background.js) ──────────────
-const DEFAULT_SETTINGS = { maxScreenshots: 10 };
+const DEFAULT_SETTINGS = { maxScreenshots: 10, theme: 'ocean' };
 
 async function bgGetSettings() {
   const r = await _store.get('settings');
-  return r.settings || DEFAULT_SETTINGS;
+  return { ...DEFAULT_SETTINGS, ...(r.settings || {}) };
 }
 
 async function bgSaveSettings(settings) {

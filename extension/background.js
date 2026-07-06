@@ -1,4 +1,4 @@
-const DEFAULT_SETTINGS = { maxScreenshots: 10 };
+const DEFAULT_SETTINGS = { maxScreenshots: 10, theme: 'ocean' };
 
 // ── Native companion (clipboard monitor) ────────────────────────────────────
 // The Swift native host watches the OS clipboard even when the browser isn't
@@ -155,7 +155,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function getSettings() {
   const result = await chrome.storage.local.get('settings');
-  return result.settings || DEFAULT_SETTINGS;
+  return { ...DEFAULT_SETTINGS, ...(result.settings || {}) };
 }
 
 async function saveSettings(settings) {
