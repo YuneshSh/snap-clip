@@ -88,7 +88,16 @@ async function bgGetScreenshots() {
   return r.screenshots || [];
 }
 
-async function bgSaveScreenshot(dataUrl) {
+// Serialize saves (mirrors extension/background.js) so rapid captures don't race.
+let _saveQueue = Promise.resolve();
+
+function bgSaveScreenshot(dataUrl) {
+  const run = _saveQueue.then(() => _doSaveScreenshot(dataUrl));
+  _saveQueue = run.catch(() => {});
+  return run;
+}
+
+async function _doSaveScreenshot(dataUrl) {
   const settings = await bgGetSettings();
   const shots = await bgGetScreenshots();
 

@@ -44,7 +44,19 @@ async function getScreenshots() {
   return result.screenshots || [];
 }
 
-async function saveScreenshot(dataUrl) {
+// Saves are serialized through this promise chain so that rapid, back-to-back
+// captures don't race on the read-modify-write of storage (which would cause
+// concurrent saves to overwrite each other and drop screenshots).
+let saveQueue = Promise.resolve();
+
+function saveScreenshot(dataUrl) {
+  const run = saveQueue.then(() => doSaveScreenshot(dataUrl));
+  // Keep the queue alive even if one save rejects.
+  saveQueue = run.catch(() => {});
+  return run;
+}
+
+async function doSaveScreenshot(dataUrl) {
   const settings = await getSettings();
   const screenshots = await getScreenshots();
 
