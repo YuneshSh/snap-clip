@@ -11,14 +11,14 @@ const countBadge     = $('countBadge');
 const grid           = $('grid');
 const emptyState     = $('emptyState');
 const toast          = $('toast');
-const clipboardHint  = $('clipboardHint');
 const pasteBtn       = $('pasteBtn');
 const emptyPasteBtn  = $('emptyPasteBtn');
 
-let screenshots = [];
-let settings    = { maxScreenshots: 10 };
-let toastTimer  = null;
-let capturing   = false;
+let screenshots   = [];
+let settings      = { maxScreenshots: 10 };
+let toastTimer    = null;
+let capturing     = false;
+let autoCaptured  = false;
 
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
@@ -29,16 +29,23 @@ let capturing   = false;
   maxInput.value = settings.maxScreenshots;
   renderGrid();
 
-  // Best-effort automatic capture. Browsers frequently block clipboard reads
-  // that aren't triggered by a user gesture, so this may fail silently — the
-  // "Paste from clipboard" button and hint banner are the reliable path.
-  captureFromClipboard({ userInitiated: false });
+  // Silently paste the last screenshot from the clipboard on open.
+  autoCapture();
 })();
+
+// The clipboard read can be rejected if it fires before the popup has focus, so
+// retry silently on focus and after short delays until one read succeeds.
+function autoCapture() {
+  if (autoCaptured) return;
+  captureFromClipboard({ userInitiated: false });
+}
+window.addEventListener('focus', autoCapture);
+setTimeout(autoCapture, 200);
+setTimeout(autoCapture, 600);
 
 // ── Manual paste triggers (reliable: a click is a user gesture) ─────────────
 pasteBtn.addEventListener('click', () => captureFromClipboard({ userInitiated: true }));
 emptyPasteBtn.addEventListener('click', () => captureFromClipboard({ userInitiated: true }));
-clipboardHint.addEventListener('click', () => captureFromClipboard({ userInitiated: true }));
 
 // ── Settings toggle ───────────────────────────────────────────────────────
 settingsBtn.addEventListener('click', () => {
@@ -78,8 +85,8 @@ clearAllBtn.addEventListener('click', async () => {
 
 // ── Clipboard capture ──────────────────────────────────────────────────────
 // Reads the clipboard, saves any image found, and updates the UI in place.
-// `userInitiated` distinguishes an explicit click (safe to show feedback and
-// which reliably grants clipboard permission) from the best-effort auto read.
+// `userInitiated` (an explicit click) shows toast feedback; the automatic read
+// on open is silent so it never nags with a banner or error.
 async function captureFromClipboard({ userInitiated }) {
   if (capturing) return;
   capturing = true;
@@ -90,6 +97,8 @@ async function captureFromClipboard({ userInitiated }) {
     }
 
     const items = await navigator.clipboard.read();
+    // The clipboard was readable — stop the silent auto-capture retries.
+    autoCaptured = true;
     let imageFound = false;
 
     for (const item of items) {
@@ -111,14 +120,12 @@ async function captureFromClipboard({ userInitiated }) {
       break;
     }
 
-    // Success: clipboard is readable, so hide the permission hint.
-    clipboardHint.classList.remove('visible');
     if (!imageFound && userInitiated) {
       showToast('No image found on the clipboard');
     }
   } catch {
-    // Permission denied, no focus, or no user gesture — surface the actionable hint.
-    clipboardHint.classList.add('visible');
+    // Read blocked (no focus / permission). Stay silent on the automatic path;
+    // only give feedback when the user explicitly clicked paste.
     if (userInitiated) {
       showToast('Clipboard blocked — allow access and try again');
     }
