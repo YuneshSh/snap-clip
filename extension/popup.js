@@ -252,16 +252,24 @@ function renderCalendar() {
     }
     if (key === selectedDate) cell.classList.add('selected');
     if (noteDates.has(key)) cell.classList.add('has-note');
-    cell.addEventListener('click', () => selectDate(key));
+    cell.dataset.date = key;
+    cell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectDate(key);
+    });
     calDays.appendChild(cell);
   }
 }
 
 function selectDate(key) {
   selectedDate = key;
-  renderCalendar();
+  // Update the selected ring without rebuilding the grid (rebuilding detaches
+  // the clicked cell and makes the document "click outside" handler close us).
+  calDays.querySelectorAll('button.cal-cell[data-date]').forEach(cell => {
+    cell.classList.toggle('selected', cell.dataset.date === key);
+  });
   renderCalNotes();
-  calNoteInput.focus();
+  if (calNoteInput) calNoteInput.focus();
 }
 
 function renderCalNotes() {
@@ -299,7 +307,10 @@ function renderCalNotes() {
     del.className = 'cal-note-del';
     del.title = 'Delete note';
     del.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    del.addEventListener('click', () => deleteNote(n.id));
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteNote(n.id);
+    });
 
     row.appendChild(dot);
     row.appendChild(span);
@@ -313,18 +324,32 @@ async function addNoteForSelected() {
   const text = (calNoteInput.value || '').trim();
   if (!selectedDate || !text) return;
   calNoteInput.value = '';
-  const res = await send('ADD_NOTE', { date: selectedDate, text });
-  // Update locally immediately (storage.onChanged may lag slightly).
-  if (res && res.success && res.entry && !(notes || []).some(n => n.id === res.entry.id)) {
-    notes = [...(notes || []), res.entry];
+  try {
+    const res = await send('ADD_NOTE', { date: selectedDate, text });
+    if (!res || !res.success) {
+      showToast('Could not save note');
+      calNoteInput.value = text;
+      return;
+    }
+    if (res.entry && !(notes || []).some(n => n.id === res.entry.id)) {
+      notes = [...(notes || []), res.entry];
+    }
     renderCalendar();
     renderCalNotes();
     renderTicker();
+    showToast('Reminder saved');
+  } catch {
+    showToast('Could not save note');
+    calNoteInput.value = text;
   }
 }
 
 async function deleteNote(id) {
-  await send('DELETE_NOTE', { id }); // storage.onChanged re-renders.
+  await send('DELETE_NOTE', { id });
+  notes = (notes || []).filter(n => n.id !== id);
+  renderCalendar();
+  renderCalNotes();
+  renderTicker();
 }
 
 calNoteAddBtn.addEventListener('click', addNoteForSelected);
@@ -435,15 +460,18 @@ calChip.addEventListener('click', (e) => {
     renderCalNotes();
   }
 });
-calPrev.addEventListener('click', () => {
+calPrev.addEventListener('click', (e) => {
+  e.stopPropagation();
   if (--calMonth < 0) { calMonth = 11; calYear--; }
   renderCalendar();
 });
-calNext.addEventListener('click', () => {
+calNext.addEventListener('click', (e) => {
+  e.stopPropagation();
   if (++calMonth > 11) { calMonth = 0; calYear++; }
   renderCalendar();
 });
-calToday.addEventListener('click', () => {
+calToday.addEventListener('click', (e) => {
+  e.stopPropagation();
   const n = new Date();
   calYear = n.getFullYear();
   calMonth = n.getMonth();
@@ -451,10 +479,18 @@ calToday.addEventListener('click', () => {
   renderCalendar();
   renderCalNotes();
 });
+
+// Clicks inside the calendar must not bubble to the document-level closer.
+if (calPanel) {
+  calPanel.addEventListener('click', (e) => e.stopPropagation());
+  calPanel.addEventListener('mousedown', (e) => e.stopPropagation());
+}
+
 document.addEventListener('click', (e) => {
-  if (!calPanel.hidden && !calPanel.contains(e.target) && !calChip.contains(e.target)) {
-    closeCalendar();
-  }
+  if (calPanel.hidden) return;
+  const path = e.composedPath ? e.composedPath() : [e.target];
+  if (path.includes(calPanel) || path.includes(calChip)) return;
+  closeCalendar();
 });
 
 decrementBtn.addEventListener('click', () => {
@@ -766,8 +802,24 @@ async function deleteText(id) {
 }
 
 async function toggleTextPin(id) {
-  await send('TOGGLE_TEXT_PIN', { id });
-  updatePinnedDrawer();
+  const entry = texts.find(t => t.id === id);
+  if (!entry) return;
+  const willPin = !Boolean(entry.pinned);
+
+  try {
+    const res = await send('TOGGLE_TEXT_PIN', { id });
+    if (res && res.success === false) {
+      showToast('Could not pin text');
+      return;
+    }
+    texts = texts.map(t => t.id === id ? { ...t, pinned: willPin } : t);
+    if (willPin) pinnedExpanded = true;
+    renderTexts();
+    updatePinnedDrawer();
+    showToast(willPin ? 'Pinned — see Pinned texts below' : 'Text unpinned');
+  } catch {
+    showToast('Could not pin text');
+  }
 }
 
 // ── Actions (Links / Bookmarks) ──────────────────────────────────────────────
@@ -787,7 +839,24 @@ function openBookmark(entry) {
 }
 
 async function toggleBookmarkPin(id) {
-  await send('TOGGLE_BOOKMARK_PIN', { id }); // storage.onChanged re-renders.
+  const entry = bookmarks.find(b => b.id === id);
+  if (!entry) return;
+  const willPin = !Boolean(entry.pinned);
+
+  try {
+    const res = await send('TOGGLE_BOOKMARK_PIN', { id });
+    if (res && res.success === false) {
+      showToast('Could not pin link');
+      return;
+    }
+    bookmarks = bookmarks.map(b => b.id === id ? { ...b, pinned: willPin } : b);
+    if (willPin) pinnedExpanded = true;
+    renderLinks();
+    updatePinnedDrawer();
+    showToast(willPin ? 'Pinned — see Pinned links below' : 'Link unpinned');
+  } catch {
+    showToast('Could not pin link');
+  }
 }
 
 async function deleteBookmark(id) {
@@ -844,7 +913,19 @@ function showToast(msg) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function send(type, extra = {}) {
-  return chrome.runtime.sendMessage({ type, ...extra });
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({ type, ...extra }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 function blobToDataUrl(blob) {
