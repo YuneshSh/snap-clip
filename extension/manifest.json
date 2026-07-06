@@ -3,7 +3,8 @@
   "name": "SnapClip",
   "version": "1.0.0",
   "description": "Saves copied screenshots for easy re-copying, downloading, or deletion.",
-  "permissions": ["storage", "clipboardRead", "clipboardWrite"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAromQS/MrH60SKbyGMeT2fDtFrUzS12ADS47x/e7zglNzOzMj9khoE41ZhllFRrq7eYcn2GbCMSj2JLWt5mzomgkV4BRr5+2f/QbKnbIHQCCyngx4ScdzwjpZ7FPNww8TLAN7PP8kCuRY/8wivp0gX2C26IwVIiiE/juO8yuMqq7g9rBxoBhcCE5W9oCC/W8wYDLk1L4QbiWkOae3TbgwbduYOnpTS8+PzFdOPEhhK//T4yaHC8o0IN57zcz5I5ARv6CYY9E9sugT25KzIK3D7C2VNtX51JIdEeqbXb+154zJbbyVV746lQjZlOhkPtG2WML6LFZxG7OO1vWWnjA3NQIDAQAB",
+  "permissions": ["storage", "clipboardRead", "clipboardWrite", "nativeMessaging", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

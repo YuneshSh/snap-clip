@@ -1,5 +1,94 @@
 const DEFAULT_SETTINGS = { maxScreenshots: 10 };
 
+// ── Native companion (clipboard monitor) ────────────────────────────────────
+// The Swift native host watches the OS clipboard even when the browser isn't
+// focused and streams images here over Native Messaging. Large images are sent
+// in chunks (Chrome caps a single host->extension message at ~1 MB), so we
+// reassemble them here before saving.
+const NATIVE_HOST = 'com.snapclip.clipboard';
+const RECONNECT_MIN_MS = 3000;      // host present but dropped -> reconnect fast
+const RECONNECT_MAX_MS = 5 * 60000; // host missing -> back off to avoid spam
+
+let nativePort = null;
+let reconnectDelay = RECONNECT_MIN_MS;
+let reconnectTimer = null;
+const imageBuffers = new Map(); // id -> { parts: string[], total: number }
+
+function connectNative() {
+  if (nativePort) return;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  let port;
+  try {
+    port = chrome.runtime.connectNative(NATIVE_HOST);
+  } catch {
+    scheduleReconnect(false);
+    return;
+  }
+  nativePort = port;
+
+  port.onMessage.addListener((msg) => {
+    // Any inbound message means the host is alive; keep reconnects snappy and
+    // reset the service-worker idle timer (heartbeats flow every ~20s).
+    reconnectDelay = RECONNECT_MIN_MS;
+    handleNativeMessage(msg);
+  });
+
+  port.onDisconnect.addListener(() => {
+    const err = chrome.runtime.lastError;
+    nativePort = null;
+    imageBuffers.clear();
+    // If the host isn't installed, Chrome reports "not found" -> back off hard.
+    const missing = err && /not found|forbidden|failed to start/i.test(err.message || '');
+    scheduleReconnect(missing);
+  });
+}
+
+function scheduleReconnect(missing) {
+  if (reconnectTimer) return;
+  const delay = missing ? RECONNECT_MAX_MS : reconnectDelay;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectNative();
+  }, delay);
+  if (!missing) {
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+  }
+}
+
+function handleNativeMessage(msg) {
+  if (!msg || !msg.type) return;
+
+  if (msg.type === 'image') {
+    let buf = imageBuffers.get(msg.id);
+    if (!buf) {
+      buf = { parts: new Array(msg.total).fill(''), total: msg.total };
+      imageBuffers.set(msg.id, buf);
+    }
+    buf.parts[msg.index] = msg.chunk || '';
+    if (msg.last || buf.parts.every((p) => p !== '')) {
+      const dataUrl = buf.parts.join('');
+      imageBuffers.delete(msg.id);
+      if (dataUrl.startsWith('data:image/')) {
+        saveScreenshot(dataUrl);
+      }
+    }
+    return;
+  }
+  // 'hello' / 'heartbeat' are keep-alive only; nothing to do.
+}
+
+// Keep the connection resilient across service-worker restarts.
+chrome.runtime.onStartup.addListener(connectNative);
+chrome.runtime.onInstalled.addListener(connectNative);
+if (chrome.alarms) {
+  chrome.alarms.create('snapclip-native-keepalive', { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'snapclip-native-keepalive' && !nativePort) connectNative();
+  });
+}
+connectNative();
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
     case 'SAVE_SCREENSHOT':

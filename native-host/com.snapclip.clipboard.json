@@ -1,0 +1,9 @@
+{
+  "name": "com.snapclip.clipboard",
+  "description": "SnapClip clipboard monitor",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://doeoikmjihhhbemlbkjohmlmcdjffoel/"
+  ]
+}
