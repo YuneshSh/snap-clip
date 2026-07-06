@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SnapClip — Extension Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Real popup styles -->
+  <link rel="stylesheet" href="extension/popup.css" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --page-bg: #0a0a0a;
+      --chrome-bg: #3c4043;
+      --chrome-bar: #202124;
+      --chrome-toolbar: #35363a;
+      --chrome-border: #5f6368;
+      --accent: #14b8a6;
+      --accent-dim: rgba(20, 184, 166, 0.15);
+      --text: #e8eaed;
+      --text-dim: #9aa0a6;
+      --card-bg: #1a1b1e;
+    }
+
+    /* Reset popup.css body/html constraints for the preview page */
+    html { font-size: 16px !important; }
+    body {
+      width: auto !important;
+      min-height: 100% !important;
+      max-height: none !important;
+      overflow: auto !important;
+      background: var(--page-bg) !important;
+      font-family: 'Inter', system-ui, sans-serif !important;
+      color: var(--text) !important;
+    }
+
+    /* The toast inside the popup-shell should be fixed to the shell, not viewport */
+    .popup-shell .toast {
+      position: absolute !important;
+    }
+
+    /* ── Page layout ── */
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    /* ── Top badge ── */
+    .page-header {
+      text-align: center;
+      padding: 40px 24px 0;
+    }
+
+    .page-header .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(20, 184, 166, 0.3);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 99px;
+      margin-bottom: 18px;
+    }
+
+    .page-header h1 {
+      font-size: clamp(28px, 5vw, 44px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+
+    .page-header p {
+      font-size: 15px;
+      color: var(--text-dim);
+      max-width: 480px;
+      margin: 0 auto 14px;
+      line-height: 1.6;
+    }
+
+    .note {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 5px 12px;
+      border-radius: 6px;
+      margin-top: 4px;
+    }
+    .note svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+    /* ── Stage ── */
+    .stage {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 24px 0;
+      gap: 32px;
+      flex-wrap: wrap;
+    }
+
+    /* ── Browser shell ── */
+    .browser {
+      flex-shrink: 0;
+      width: 720px;
+      max-width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+    }
+
+    /* Traffic lights + address bar */
+    .browser-bar {
+      background: var(--chrome-bar);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .traffic-lights {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+    .dot.red    { background: #ff5f57; }
+    .dot.yellow { background: #febc2e; }
+    .dot.green  { background: #28c840; }
+
+    .address-bar {
+      flex: 1;
+      background: var(--chrome-toolbar);
+      border-radius: 6px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .address-bar svg { width: 12px; height: 12px; flex-shrink: 0; }
+
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .toolbar-btn {
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-dim);
+      cursor: default;
+      position: relative;
+    }
+    .toolbar-btn svg { width: 18px; height: 18px; }
+
+    /* Extension button — active state */
+    .ext-btn {
+      background: rgba(20,184,166,0.18);
+      color: var(--accent);
+      border: 1px solid rgba(20,184,166,0.35);
+      cursor: pointer;
+      position: relative;
+    }
+    .ext-btn::after {
+      content: '';
+      position: absolute;
+      bottom: -2px; left: 50%;
+      transform: translateX(-50%);
+      width: 6px; height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+
+    /* Browser viewport */
+    .browser-viewport {
+      background: #fff;
+      height: 380px;
+      position: relative;
+      overflow: hidden;
+      background-image:
+        linear-gradient(rgba(0,0,0,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,0.02) 1px, transparent 1px);
+      background-size: 20px 20px;
+      background-color: #f8f9fa;
+    }
+
+    /* Fake webpage content */
+    .fake-page {
+      padding: 28px 32px;
+    }
+
+    .fake-nav {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #e5e7eb;
+      margin-bottom: 20px;
+    }
+
+    .fake-logo {
+      width: 80px; height: 14px;
+      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      border-radius: 3px;
+    }
+
+    .fake-links {
+      display: flex;
+      gap: 14px;
+    }
+
+    .fake-link {
+      width: 40px; height: 10px;
+      background: #d1d5db;
+      border-radius: 3px;
+    }
+
+    .fake-hero {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .fake-text-block { display: flex; flex-direction: column; gap: 8px; }
+    .fake-title { width: 80%; height: 14px; background: #374151; border-radius: 3px; }
+    .fake-line  { height: 9px; background: #d1d5db; border-radius: 3px; }
+    .fake-line.short { width: 70%; }
+    .fake-btn-placeholder {
+      width: 90px; height: 28px;
+      background: #6366f1;
+      border-radius: 6px;
+      margin-top: 4px;
+    }
+
+    .fake-img {
+      background: linear-gradient(135deg, #dbeafe, #e0e7ff);
+      border-radius: 8px;
+      height: 130px;
+    }
+
+    /* ── Popup overlay on the browser ── */
+    .popup-anchor {
+      position: absolute;
+      top: 0; right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      padding-right: 8px;
+    }
+
+    /* Arrow pointing up to extension button */
+    .popup-arrow {
+      width: 0; height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-bottom: 8px solid #fff;
+      margin-right: 20px;
+      filter: drop-shadow(0 -2px 2px rgba(0,0,0,0.08));
+    }
+
+    /* The popup itself */
+    .popup-shell {
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow:
+        0 4px 24px rgba(0,0,0,0.18),
+        0 0 0 1px rgba(0,0,0,0.08);
+    }
+
+    /* Override popup body constraints for preview embedding */
+    .popup-shell body,
+    .popup-shell .app {
+      max-height: none !important;
+    }
+
+    /* ── Features sidebar ── */
+    .features {
+      flex-shrink: 0;
+      width: 220px;
+    }
+
+    .features-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+
+    .feature-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--card-bg);
+      border: 1px solid rgba(255,255,255,0.05);
+      margin-bottom: 8px;
+    }
+
+    .feature-icon {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      background: var(--accent-dim);
+      border: 1px solid rgba(20,184,166,0.2);
+      color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .feature-icon svg { width: 14px; height: 14px; }
+
+    .feature-text strong {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 2px;
+    }
+
+    .feature-text span {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    /* ── Footer ── */
+    .page-footer {
+      text-align: center;
+      padding: 32px 24px 40px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .page-footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Page header -->
+  <header class="page-header">
+    <div class="badge">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10">
+        <circle cx="8" cy="8" r="4"/>
+      </svg>
+      Live Preview
+    </div>
+    <h1>SnapClip</h1>
+    <p>A Chrome extension that automatically saves every screenshot you copy, so you can re-copy or download it any time.</p>
+    <div class="note">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      Sample screenshots shown — click any card to copy, save or delete
+    </div>
+  </header>
+
+  <!-- Stage: browser mockup + sidebar -->
+  <div class="stage">
+
+    <!-- Browser mockup -->
+    <div class="browser">
+
+      <!-- Chrome toolbar -->
+      <div class="browser-bar">
+        <div class="traffic-lights">
+          <div class="dot red"></div>
+          <div class="dot yellow"></div>
+          <div class="dot green"></div>
+        </div>
+
+        <div class="address-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          github.com/YuneshSh/snapClip
+        </div>
+
+        <div class="toolbar-right">
+          <!-- generic toolbar button -->
+          <div class="toolbar-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+          </div>
+
+          <!-- Extension button (active / popup open) -->
+          <div class="toolbar-btn ext-btn" title="SnapClip is open">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="12" cy="12" r="4"/>
+              <path d="M7 3v2M17 3v2M3 7h2M19 7h2"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- Viewport: fake webpage + popup overlay -->
+      <div class="browser-viewport">
+
+        <!-- Fake webpage behind popup -->
+        <div class="fake-page">
+          <div class="fake-nav">
+            <div class="fake-logo"></div>
+            <div class="fake-links">
+              <div class="fake-link"></div>
+              <div class="fake-link"></div>
+              <div class="fake-link"></div>
+            </div>
+          </div>
+          <div class="fake-hero">
+            <div class="fake-text-block">
+              <div class="fake-title"></div>
+              <div class="fake-line"></div>
+              <div class="fake-line short"></div>
+              <div class="fake-line"></div>
+              <div class="fake-btn-placeholder"></div>
+            </div>
+            <div class="fake-img"></div>
+          </div>
+        </div>
+
+        <!-- Popup dropdown anchored top-right -->
+        <div class="popup-anchor">
+          <div class="popup-arrow"></div>
+          <div class="popup-shell">
+            <!--
+              The actual popup HTML lives below.
+              chrome-mock.js and popup.js are loaded at end of <body>.
+            -->
+            <div class="app">
+              <!-- Header -->
+              <header class="header">
+                <div class="header-left">
+                  <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                    <circle cx="12" cy="12" r="4"/>
+                    <path d="M7 3v2M17 3v2M3 7h2M19 7h2"/>
+                  </svg>
+                  <span class="title">Screenshots</span>
+                </div>
+                <div class="header-right">
+                  <span class="count-badge" id="countBadge">0 / 10</span>
+                  <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                  </button>
+                </div>
+              </header>
+
+              <!-- Settings Panel -->
+              <div class="settings-panel" id="settingsPanel">
+                <div class="settings-inner">
+                  <h3 class="settings-title">Settings</h3>
+                  <div class="setting-row">
+                    <label for="maxInput" class="setting-label">Max saved screenshots</label>
+                    <div class="setting-control">
+                      <button class="stepper-btn" id="decrementBtn" aria-label="Decrease">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
+                      <input type="number" id="maxInput" class="max-input" min="1" max="50" value="10" />
+                      <button class="stepper-btn" id="incrementBtn" aria-label="Increase">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="settings-actions">
+                    <button class="btn btn-secondary btn-sm" id="clearAllBtn">Clear all</button>
+                    <button class="btn btn-primary btn-sm" id="saveSettingsBtn">Save</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Clipboard Hint Banner -->
+              <div class="hint-banner" id="clipboardHint">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span>Clipboard access required — click <strong>Allow</strong> if prompted</span>
+              </div>
+
+              <!-- Toast -->
+              <div class="toast" id="toast"></div>
+
+              <!-- Main content -->
+              <main class="main" id="main">
+                <div class="empty-state" id="emptyState">
+                  <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/>
+                    <circle cx="12" cy="12" r="4"/>
+                    <path d="M7 3v2M17 3v2M3 7h2M19 7h2"/>
+                  </svg>
+                  <p class="empty-title">No screenshots yet</p>
+                  <p class="empty-sub">Copy a screenshot with any tool and it will appear here automatically.</p>
+                </div>
+                <div class="grid" id="grid"></div>
+              </main>
+            </div>
+
+            <!-- Card template (must be outside .app but inside popup-shell) -->
+            <template id="cardTemplate">
+              <div class="card" data-id="">
+                <div class="card-img-wrap">
+                  <img class="card-img" alt="Screenshot" />
+                  <div class="card-overlay">
+                    <button class="overlay-btn copy-btn" title="Copy to clipboard">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                      </svg>
+                      Copy
+                    </button>
+                  </div>
+                </div>
+                <div class="card-footer">
+                  <span class="card-time"></span>
+                  <div class="card-actions">
+                    <button class="action-btn save-btn" title="Save image">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                    </button>
+                    <button class="action-btn delete-btn" title="Delete">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                        <path d="M10 11v6M14 11v6"/>
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div><!-- /.popup-shell -->
+        </div><!-- /.popup-anchor -->
+
+      </div><!-- /.browser-viewport -->
+    </div><!-- /.browser -->
+
+    <!-- Features sidebar -->
+    <aside class="features">
+      <p class="features-title">How it works</p>
+
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <strong>Auto-capture</strong>
+          <span>Detected on every page copy event and on popup open for OS screenshots.</span>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <strong>One-click re-copy</strong>
+          <span>Hover any card and click Copy to put it back on your clipboard instantly.</span>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <strong>Download any shot</strong>
+          <span>Save screenshots as PNG files directly from the popup.</span>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <strong>Configurable limit</strong>
+          <span>1 – 50 slots. Oldest auto-removed when full (circular buffer).</span>
+        </div>
+      </div>
+
+      <div class="feature-item">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+        </div>
+        <div class="feature-text">
+          <strong>Local storage only</strong>
+          <span>Screenshots stay in your browser. Nothing is sent to any server.</span>
+        </div>
+      </div>
+    </aside>
+
+  </div><!-- /.stage -->
+
+  <footer class="page-footer">
+    SnapClip Chrome Extension &mdash;
+    <a href="https://github.com/YuneshSh/snapClip" target="_blank" rel="noopener">github.com/YuneshSh/snapClip</a>
+  </footer>
+
+</div><!-- /.page -->
+
+<!-- Chrome API shim must load before popup.js -->
+<script src="chrome-mock.js"></script>
+<script src="extension/popup.js"></script>
+</body>
+</html>
