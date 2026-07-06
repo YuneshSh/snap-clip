@@ -431,7 +431,7 @@ function updatePinnedDrawer() {
       pinnedList.appendChild(empty);
     } else {
       items.forEach(entry => {
-        pinnedList.appendChild(isTexts ? buildTextCard(entry, false) : buildBookmarkCard(entry, false));
+        pinnedList.appendChild(isTexts ? buildPinnedTextCard(entry) : buildBookmarkCard(entry, false));
       });
     }
   }
@@ -694,6 +694,31 @@ function buildTextCard(entry, isNew) {
 
   item.querySelector('.text-body').addEventListener('click', () => copyText(entry));
   pinBtn.addEventListener('click', e => { e.stopPropagation(); toggleTextPin(entry.id); });
+  item.querySelector('.text-delete-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    deleteText(entry.id);
+  });
+
+  return item;
+}
+
+function buildPinnedTextCard(entry) {
+  const template = document.getElementById('pinnedTextTemplate');
+  const node     = template.content.cloneNode(true);
+  const item     = node.querySelector('.pinned-text-item');
+
+  item.dataset.id = entry.id;
+  item.querySelector('.pinned-text-content').textContent = entry.text;
+
+  item.querySelector('.pinned-text-copy').addEventListener('click', () => copyText(entry));
+  item.querySelector('.pinned-mini-copy').addEventListener('click', e => {
+    e.stopPropagation();
+    copyText(entry);
+  });
+  item.querySelector('.text-pin-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    toggleTextPin(entry.id);
+  });
   item.querySelector('.text-delete-btn').addEventListener('click', e => {
     e.stopPropagation();
     deleteText(entry.id);
