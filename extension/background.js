@@ -114,6 +114,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'DELETE_SCREENSHOT':
       deleteScreenshot(message.id).then(sendResponse);
       return true;
+    case 'DELETE_SCREENSHOTS':
+      deleteScreenshots(message.ids).then(sendResponse);
+      return true;
+    case 'RESTORE_SCREENSHOTS':
+      restoreScreenshots(message.items).then(sendResponse);
+      return true;
+    case 'UPDATE_SCREENSHOT':
+      updateScreenshot(message.id, message.patch).then(sendResponse);
+      return true;
     case 'CLEAR_ALL':
       clearAll().then(sendResponse);
       return true;
@@ -125,6 +134,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     case 'DELETE_TEXT':
       deleteText(message.id).then(sendResponse);
+      return true;
+    case 'DELETE_TEXTS':
+      deleteTexts(message.ids).then(sendResponse);
+      return true;
+    case 'RESTORE_TEXTS':
+      restoreTexts(message.items).then(sendResponse);
       return true;
     case 'TOGGLE_TEXT_PIN':
       toggleTextPin(message.id).then(sendResponse);
@@ -146,6 +161,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     case 'DELETE_BOOKMARK':
       deleteBookmark(message.id).then(sendResponse);
+      return true;
+    case 'DELETE_BOOKMARKS':
+      deleteBookmarks(message.ids).then(sendResponse);
+      return true;
+    case 'RESTORE_BOOKMARKS':
+      restoreBookmarks(message.items).then(sendResponse);
+      return true;
+    case 'FETCH_LINK_PREVIEW':
+      fetchLinkPreview(message.id, message.url).then(sendResponse);
       return true;
     case 'TOGGLE_BOOKMARK_PIN':
       toggleBookmarkPin(message.id).then(sendResponse);
@@ -238,6 +262,36 @@ async function deleteScreenshot(id) {
   return { success: true };
 }
 
+async function deleteScreenshots(ids) {
+  const idSet = new Set(ids || []);
+  const screenshots = await getScreenshots();
+  const before = screenshots.length;
+  const next = screenshots.filter(s => !idSet.has(s.id));
+  await chrome.storage.local.set({ screenshots: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function restoreScreenshots(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await getSettings();
+  const screenshots = await getScreenshots();
+  const existing = new Set(screenshots.map(s => s.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...screenshots];
+  const capped = merged.slice(0, settings.maxScreenshots);
+  await chrome.storage.local.set({ screenshots: capped });
+  return { success: true, restored: toAdd.length };
+}
+
+async function updateScreenshot(id, patch) {
+  const screenshots = await getScreenshots();
+  const idx = screenshots.findIndex(s => s.id === id);
+  if (idx === -1) return { success: false, reason: 'not_found' };
+  screenshots[idx] = { ...screenshots[idx], ...patch };
+  await chrome.storage.local.set({ screenshots });
+  return { success: true };
+}
+
 async function clearAll() {
   await chrome.storage.local.set({ screenshots: [] });
   return { success: true };
@@ -299,6 +353,26 @@ async function deleteText(id) {
   const texts = await getTexts();
   await chrome.storage.local.set({ texts: texts.filter(t => t.id !== id) });
   return { success: true };
+}
+
+async function deleteTexts(ids) {
+  const idSet = new Set(ids || []);
+  const texts = await getTexts();
+  const before = texts.length;
+  const next = texts.filter(t => !idSet.has(t.id));
+  await chrome.storage.local.set({ texts: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function restoreTexts(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await getSettings();
+  const texts = await getTexts();
+  const existing = new Set(texts.map(t => t.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...texts];
+  await chrome.storage.local.set({ texts: trimPinAware(merged, settings.maxScreenshots) });
+  return { success: true, restored: toAdd.length };
 }
 
 async function toggleTextPin(id) {
@@ -367,13 +441,80 @@ async function doSaveBookmark(url) {
   const trimmed = trimPinAware(bookmarks, settings.maxScreenshots);
 
   await chrome.storage.local.set({ bookmarks: trimmed });
+  fetchLinkPreview(entry.id, value);
   return { success: true, id: entry.id, entry };
+}
+
+function normalizeUrl(url) {
+  return /^https?:\/\//i.test(url) ? url : 'https://' + url;
+}
+
+function parseTitleFromHtml(html) {
+  const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+  const tit = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  return (og?.[1] || tit?.[1] || '').replace(/\s+/g, ' ').trim();
+}
+
+async function patchBookmark(id, patch) {
+  const bookmarks = await getBookmarks();
+  const idx = bookmarks.findIndex(b => b.id === id);
+  if (idx === -1) return { success: false, reason: 'not_found' };
+  bookmarks[idx] = { ...bookmarks[idx], ...patch };
+  await chrome.storage.local.set({ bookmarks });
+  return { success: true };
+}
+
+async function fetchLinkPreview(id, url) {
+  try {
+    const normalized = normalizeUrl(url);
+    const hostname = new URL(normalized).hostname.replace(/^www\./, '');
+    const faviconUrl = `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
+    let title = hostname;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+      const res = await fetch(normalized, { signal: controller.signal, redirect: 'follow' });
+      clearTimeout(timer);
+      if (res.ok) {
+        const html = await res.text();
+        const parsed = parseTitleFromHtml(html);
+        if (parsed) title = parsed;
+      }
+    } catch {
+      clearTimeout(timer);
+    }
+    await patchBookmark(id, { title, faviconUrl, previewFetchedAt: Date.now() });
+    return { success: true, title, faviconUrl };
+  } catch {
+    return { success: false };
+  }
 }
 
 async function deleteBookmark(id) {
   const bookmarks = await getBookmarks();
   await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.id !== id) });
   return { success: true };
+}
+
+async function deleteBookmarks(ids) {
+  const idSet = new Set(ids || []);
+  const bookmarks = await getBookmarks();
+  const before = bookmarks.length;
+  const next = bookmarks.filter(b => !idSet.has(b.id));
+  await chrome.storage.local.set({ bookmarks: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function restoreBookmarks(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await getSettings();
+  const bookmarks = await getBookmarks();
+  const existing = new Set(bookmarks.map(b => b.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...bookmarks];
+  await chrome.storage.local.set({ bookmarks: trimPinAware(merged, settings.maxScreenshots) });
+  return { success: true, restored: toAdd.length };
 }
 
 async function toggleBookmarkPin(id) {

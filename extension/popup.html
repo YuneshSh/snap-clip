@@ -118,7 +118,10 @@
     </div>
 
     <!-- Toast -->
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast">
+      <span id="toastMsg"></span>
+      <button type="button" class="toast-action" id="toastAction" hidden>Undo</button>
+    </div>
 
     <!-- Tabs -->
     <nav class="tabs" role="tablist">
@@ -150,6 +153,10 @@
     <main class="main" id="main">
       <!-- Snaps panel -->
       <section class="panel" id="snapsPanel">
+        <div class="list-toolbar snaps-toolbar" id="snapsToolbar">
+          <button type="button" class="toolbar-btn" id="snapSelectBtn">Select</button>
+          <button type="button" class="toolbar-btn danger" id="snapBulkDeleteBtn" hidden>Delete</button>
+        </div>
         <div class="empty-state" id="emptyState">
           <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -173,6 +180,15 @@
 
       <!-- Texts panel -->
       <section class="panel" id="textsPanel" hidden>
+        <div class="list-toolbar" id="textsToolbar">
+          <input type="search" id="textSearchInput" class="list-search" placeholder="Search texts…" autocomplete="off" />
+          <select id="textSortSelect" class="list-filter" aria-label="Sort texts">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
+          <button type="button" class="toolbar-btn" id="textSelectBtn">Select</button>
+          <button type="button" class="toolbar-btn danger" id="textBulkDeleteBtn" hidden>Delete</button>
+        </div>
         <div class="empty-state" id="emptyStateTexts">
           <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M4 6h16M4 11h16M4 16h10"/>
@@ -180,17 +196,34 @@
           <p class="empty-title">No copied text yet</p>
           <p class="empty-sub">Copy any text and it will appear here. Click an entry to copy it again.</p>
         </div>
+        <div class="empty-state empty-filtered" id="emptyStateTextsFiltered" hidden>
+          <p class="empty-title">No matching texts</p>
+          <p class="empty-sub">Try a different search term.</p>
+        </div>
         <div class="text-list" id="textList"></div>
       </section>
 
       <!-- Links / Bookmarks panel -->
       <section class="panel" id="linksPanel" hidden>
+        <div class="list-toolbar" id="linksToolbar">
+          <input type="search" id="linkSearchInput" class="list-search" placeholder="Search links…" autocomplete="off" />
+          <select id="linkSortSelect" class="list-filter" aria-label="Sort links">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
+          <button type="button" class="toolbar-btn" id="linkSelectBtn">Select</button>
+          <button type="button" class="toolbar-btn danger" id="linkBulkDeleteBtn" hidden>Delete</button>
+        </div>
         <div class="empty-state" id="emptyStateLinks">
           <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
           </svg>
           <p class="empty-title">No links yet</p>
           <p class="empty-sub">Copy any URL and it lands here. Pin the ones you want to keep for good.</p>
+        </div>
+        <div class="empty-state empty-filtered" id="emptyStateLinksFiltered" hidden>
+          <p class="empty-title">No matching links</p>
+          <p class="empty-sub">Try a different search term.</p>
         </div>
         <div class="link-list" id="linkList"></div>
       </section>
@@ -213,6 +246,10 @@
   <!-- Card template -->
   <template id="cardTemplate">
     <div class="card" data-id="">
+      <label class="item-select-wrap">
+        <input type="checkbox" class="item-select" />
+      </label>
+      <div class="card-main">
       <button class="card-img-wrap view-trigger" title="Click to view">
         <img class="card-img" alt="Screenshot" />
         <span class="card-overlay">
@@ -256,12 +293,17 @@
           </button>
         </div>
       </div>
+      </div>
     </div>
   </template>
 
   <!-- Text item template -->
   <template id="textCardTemplate">
     <div class="text-item" data-id="">
+      <label class="item-select-wrap">
+        <input type="checkbox" class="item-select" />
+      </label>
+      <div class="text-item-main">
       <button class="text-body" title="Click to copy">
         <p class="text-content"></p>
         <span class="text-copy-hint">
@@ -289,6 +331,7 @@
             </svg>
           </button>
         </div>
+      </div>
       </div>
     </div>
   </template>
@@ -326,12 +369,16 @@
   <!-- Bookmark item template -->
   <template id="bookmarkTemplate">
     <div class="link-item" data-id="">
+      <label class="item-select-wrap">
+        <input type="checkbox" class="item-select" />
+      </label>
+      <div class="link-item-main">
       <button class="link-body" title="Click to copy link">
-        <svg class="link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-        </svg>
-        <span class="link-url"></span>
+        <img class="link-favicon" alt="" />
+        <span class="link-meta">
+          <span class="link-title"></span>
+          <span class="link-url"></span>
+        </span>
         <span class="text-copy-hint">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="9" y="9" width="13" height="13" rx="2"/>
@@ -364,6 +411,7 @@
           </button>
         </div>
       </div>
+      </div>
     </div>
   </template>
 
@@ -394,8 +442,19 @@
           </button>
         </div>
       </div>
+      <div class="lightbox-tools" id="lightboxTools">
+        <button type="button" class="annotate-tool active" id="annotatePen" title="Pen">Pen</button>
+        <button type="button" class="annotate-tool" id="annotateArrow" title="Arrow">Arrow</button>
+        <button type="button" class="annotate-tool" id="annotateText" title="Text label">Text</button>
+        <button type="button" class="annotate-tool" id="annotateMove" title="Move text labels">Move</button>
+        <button type="button" class="annotate-tool" id="annotateUndo" title="Undo stroke">Undo</button>
+        <button type="button" class="annotate-tool primary" id="annotateSave" title="Save annotations">Save</button>
+      </div>
       <div class="lightbox-imgwrap">
-        <img class="lightbox-img" id="lightboxImg" alt="Screenshot preview" />
+        <div class="lightbox-canvas-stack" id="lightboxCanvasStack">
+          <img class="lightbox-img" id="lightboxImg" alt="Screenshot preview" />
+          <canvas id="lightboxCanvas" class="lightbox-canvas"></canvas>
+        </div>
       </div>
     </div>
   </div>

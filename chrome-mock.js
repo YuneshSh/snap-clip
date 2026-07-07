@@ -160,6 +160,35 @@ async function bgDeleteScreenshot(id) {
   return { success: true };
 }
 
+async function bgDeleteScreenshots(ids) {
+  const idSet = new Set(ids || []);
+  const shots = await bgGetScreenshots();
+  const before = shots.length;
+  const next = shots.filter(s => !idSet.has(s.id));
+  await _store.set({ screenshots: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function bgRestoreScreenshots(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await bgGetSettings();
+  const shots = await bgGetScreenshots();
+  const existing = new Set(shots.map(s => s.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...shots].slice(0, settings.maxScreenshots);
+  await _store.set({ screenshots: merged });
+  return { success: true, restored: toAdd.length };
+}
+
+async function bgUpdateScreenshot(id, patch) {
+  const shots = await bgGetScreenshots();
+  const idx = shots.findIndex(s => s.id === id);
+  if (idx === -1) return { success: false, reason: 'not_found' };
+  shots[idx] = { ...shots[idx], ...patch };
+  await _store.set({ screenshots: shots });
+  return { success: true };
+}
+
 async function bgClearAll() {
   await _store.set({ screenshots: [] });
   return { success: true };
@@ -209,6 +238,26 @@ async function bgDeleteText(id) {
   const texts = await bgGetTexts();
   await _store.set({ texts: texts.filter(t => t.id !== id) });
   return { success: true };
+}
+
+async function bgDeleteTexts(ids) {
+  const idSet = new Set(ids || []);
+  const texts = await bgGetTexts();
+  const before = texts.length;
+  const next = texts.filter(t => !idSet.has(t.id));
+  await _store.set({ texts: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function bgRestoreTexts(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await bgGetSettings();
+  const texts = await bgGetTexts();
+  const existing = new Set(texts.map(t => t.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...texts];
+  await _store.set({ texts: _trimPinAware(merged, settings.maxScreenshots) });
+  return { success: true, restored: toAdd.length };
 }
 
 async function bgToggleTextPin(id) {
@@ -262,13 +311,80 @@ async function _doSaveBookmark(url) {
   };
   bookmarks.unshift(entry);
   await _store.set({ bookmarks: _trimPinAware(bookmarks, settings.maxScreenshots) });
+  bgFetchLinkPreview(entry.id, value);
   return { success: true, id: entry.id, entry };
+}
+
+function _normalizeUrl(url) {
+  return /^https?:\/\//i.test(url) ? url : 'https://' + url;
+}
+
+function _parseTitleFromHtml(html) {
+  const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
+    || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+  const tit = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  return (og?.[1] || tit?.[1] || '').replace(/\s+/g, ' ').trim();
+}
+
+async function _patchBookmark(id, patch) {
+  const bookmarks = await bgGetBookmarks();
+  const idx = bookmarks.findIndex(b => b.id === id);
+  if (idx === -1) return { success: false };
+  bookmarks[idx] = { ...bookmarks[idx], ...patch };
+  await _store.set({ bookmarks });
+  return { success: true };
+}
+
+async function bgFetchLinkPreview(id, url) {
+  try {
+    const normalized = _normalizeUrl(url);
+    const hostname = new URL(normalized).hostname.replace(/^www\./, '');
+    const faviconUrl = `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
+    let title = hostname;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+      const res = await fetch(normalized, { signal: controller.signal, redirect: 'follow' });
+      clearTimeout(timer);
+      if (res.ok) {
+        const html = await res.text();
+        const parsed = _parseTitleFromHtml(html);
+        if (parsed) title = parsed;
+      }
+    } catch {
+      clearTimeout(timer);
+    }
+    await _patchBookmark(id, { title, faviconUrl, previewFetchedAt: Date.now() });
+    return { success: true, title, faviconUrl };
+  } catch {
+    return { success: false };
+  }
 }
 
 async function bgDeleteBookmark(id) {
   const bookmarks = await bgGetBookmarks();
   await _store.set({ bookmarks: bookmarks.filter(b => b.id !== id) });
   return { success: true };
+}
+
+async function bgDeleteBookmarks(ids) {
+  const idSet = new Set(ids || []);
+  const bookmarks = await bgGetBookmarks();
+  const before = bookmarks.length;
+  const next = bookmarks.filter(b => !idSet.has(b.id));
+  await _store.set({ bookmarks: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function bgRestoreBookmarks(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await bgGetSettings();
+  const bookmarks = await bgGetBookmarks();
+  const existing = new Set(bookmarks.map(b => b.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...bookmarks];
+  await _store.set({ bookmarks: _trimPinAware(merged, settings.maxScreenshots) });
+  return { success: true, restored: toAdd.length };
 }
 
 async function bgToggleBookmarkPin(id) {
@@ -340,14 +456,22 @@ window.chrome = {
         case 'GET_SCREENSHOTS':   return bgGetScreenshots();
         case 'SAVE_SCREENSHOT':   return bgSaveScreenshot(msg.dataUrl);
         case 'DELETE_SCREENSHOT': return bgDeleteScreenshot(msg.id);
+        case 'DELETE_SCREENSHOTS': return bgDeleteScreenshots(msg.ids);
+        case 'RESTORE_SCREENSHOTS': return bgRestoreScreenshots(msg.items);
+        case 'UPDATE_SCREENSHOT': return bgUpdateScreenshot(msg.id, msg.patch);
         case 'CLEAR_ALL':         return bgClearAll();
         case 'GET_TEXTS':         return bgGetTexts();
         case 'SAVE_TEXT':         return bgSaveText(msg.text);
         case 'DELETE_TEXT':       return bgDeleteText(msg.id);
+        case 'DELETE_TEXTS':      return bgDeleteTexts(msg.ids);
+        case 'RESTORE_TEXTS':     return bgRestoreTexts(msg.items);
         case 'TOGGLE_TEXT_PIN':   return bgToggleTextPin(msg.id);
         case 'CLEAR_TEXTS':       return bgClearTexts();
         case 'GET_BOOKMARKS':     return bgGetBookmarks();
         case 'DELETE_BOOKMARK':   return bgDeleteBookmark(msg.id);
+        case 'DELETE_BOOKMARKS':  return bgDeleteBookmarks(msg.ids);
+        case 'RESTORE_BOOKMARKS': return bgRestoreBookmarks(msg.items);
+        case 'FETCH_LINK_PREVIEW': return bgFetchLinkPreview(msg.id, msg.url);
         case 'TOGGLE_BOOKMARK_PIN': return bgToggleBookmarkPin(msg.id);
         case 'CLEAR_BOOKMARKS':   return bgClearBookmarks();
         case 'GET_NOTES':         return bgGetNotes();

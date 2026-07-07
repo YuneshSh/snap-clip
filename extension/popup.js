@@ -51,6 +51,29 @@ const pinnedToggle   = $('pinnedToggle');
 const pinnedList     = $('pinnedList');
 const pinnedCount    = $('pinnedCount');
 const pinnedTitle    = $('pinnedTitle');
+const toastMsg       = $('toastMsg');
+const toastAction    = $('toastAction');
+const textSearchInput= $('textSearchInput');
+const textSortSelect = $('textSortSelect');
+const textSelectBtn  = $('textSelectBtn');
+const textBulkDeleteBtn = $('textBulkDeleteBtn');
+const emptyStateTextsFiltered = $('emptyStateTextsFiltered');
+const linkSearchInput= $('linkSearchInput');
+const linkSortSelect = $('linkSortSelect');
+const linkSelectBtn  = $('linkSelectBtn');
+const linkBulkDeleteBtn = $('linkBulkDeleteBtn');
+const emptyStateLinksFiltered = $('emptyStateLinksFiltered');
+const snapSelectBtn  = $('snapSelectBtn');
+const snapBulkDeleteBtn = $('snapBulkDeleteBtn');
+const lightboxImgwrap = document.querySelector('.lightbox-imgwrap');
+const lightboxCanvas = $('lightboxCanvas');
+const lightboxCanvasStack = $('lightboxCanvasStack');
+const annotatePen    = $('annotatePen');
+const annotateArrow  = $('annotateArrow');
+const annotateText   = $('annotateText');
+const annotateMove   = $('annotateMove');
+const annotateUndo   = $('annotateUndo');
+const annotateSave   = $('annotateSave');
 
 let screenshots   = [];
 let texts         = [];
@@ -63,6 +86,21 @@ let toastTimer    = null;
 let capturing     = false;
 let autoCaptured  = false;
 let lastTextSeen  = null;
+
+let textSearchQuery = '';
+let textSortOrder   = 'newest';
+let linkSearchQuery = '';
+let linkSortOrder   = 'newest';
+let textSelectMode  = false;
+let linkSelectMode  = false;
+let snapSelectMode  = false;
+let selectedTextIds = new Set();
+let selectedLinkIds = new Set();
+let selectedSnapIds = new Set();
+let undoPending     = null;
+let undoTimer       = null;
+
+const UNDO_MS = 8000;
 
 const POPUP_WIDTH  = 520;
 const POPUP_HEIGHT = 600;
@@ -108,6 +146,7 @@ lockPopupSize();
   initCalendar();
   renderTicker();
   lockPopupSize();
+  backfillLinkPreviews();
 
   // Silently pull the last screenshot / text from the clipboard on open.
   autoCapture();
@@ -158,6 +197,9 @@ const TABS = {
 function switchTab(tab) {
   activeTab = tab;
   pinnedExpanded = false;
+  exitSelectionMode('texts');
+  exitSelectionMode('links');
+  exitSelectionMode('snaps');
   for (const [name, { btn, panel }] of Object.entries(TABS)) {
     const on = name === tab;
     btn.classList.toggle('active', on);
@@ -632,13 +674,13 @@ async function captureFromClipboard({ userInitiated }) {
 
 // ── Render (Snaps) ──────────────────────────────────────────────────────────
 function renderGrid() {
-  // Only newly-arrived items animate in; existing ones stay put on re-render.
   const known = new Set([...grid.children].map(c => c.dataset.id));
   grid.innerHTML = '';
 
   const hasItems = screenshots.length > 0;
   emptyState.style.display = hasItems ? 'none' : '';
   grid.style.display       = hasItems ? '' : 'none';
+  if ($('snapsToolbar')) $('snapsToolbar').style.display = hasItems ? '' : 'none';
 
   screenshots.forEach((shot) => {
     grid.appendChild(buildCard(shot, !known.has(shot.id)));
@@ -662,17 +704,20 @@ function buildCard(shot, isNew) {
   card.querySelectorAll('.view-trigger').forEach(el => {
     el.addEventListener('click', e => {
       e.stopPropagation();
+      if (snapSelectMode) return;
       openLightbox(shot);
     });
   });
 
   card.querySelector('.copy-btn').addEventListener('click', e => {
     e.stopPropagation();
+    if (snapSelectMode) return;
     copyToClipboard(shot);
   });
 
   card.querySelector('.save-btn').addEventListener('click', e => {
     e.stopPropagation();
+    if (snapSelectMode) return;
     downloadImage(shot);
   });
 
@@ -681,21 +726,299 @@ function buildCard(shot, isNew) {
     deleteScreenshot(shot.id);
   });
 
+  if (snapSelectMode) wireItemSelection(card, shot, 'snaps');
+
   return card;
 }
+
+// ── Search, filter, selection, undo ─────────────────────────────────────────
+function sortBySavedAt(items, order) {
+  const sorted = [...items];
+  sorted.sort((a, b) => order === 'oldest' ? a.savedAt - b.savedAt : b.savedAt - a.savedAt);
+  return sorted;
+}
+
+function filterTexts(items) {
+  const q = textSearchQuery.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter(t => (t.text || '').toLowerCase().includes(q));
+}
+
+function filterBookmarks(items) {
+  const q = linkSearchQuery.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter(b => {
+    const hay = [b.url, b.title, prettyUrl(b.url)].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function getVisibleTexts() {
+  return sortBySavedAt(filterTexts(texts.filter(t => !t.pinned)), textSortOrder);
+}
+
+function getVisibleBookmarks() {
+  return sortBySavedAt(filterBookmarks(bookmarks.filter(b => !b.pinned)), linkSortOrder);
+}
+
+function updateBulkDeleteBtn(tab) {
+  if (tab === 'texts') {
+    const n = selectedTextIds.size;
+    textBulkDeleteBtn.hidden = !textSelectMode || n === 0;
+    textBulkDeleteBtn.textContent = n ? `Delete (${n})` : 'Delete';
+  } else if (tab === 'links') {
+    const n = selectedLinkIds.size;
+    linkBulkDeleteBtn.hidden = !linkSelectMode || n === 0;
+    linkBulkDeleteBtn.textContent = n ? `Delete (${n})` : 'Delete';
+  } else if (tab === 'snaps') {
+    const n = selectedSnapIds.size;
+    snapBulkDeleteBtn.hidden = !snapSelectMode || n === 0;
+    snapBulkDeleteBtn.textContent = n ? `Delete (${n})` : 'Delete';
+  }
+}
+
+function enterSelectionMode(tab) {
+  if (tab === 'texts') {
+    textSelectMode = true;
+    textSelectBtn.textContent = 'Cancel';
+    textSelectBtn.classList.add('active');
+    textList.classList.add('selection-mode');
+  } else if (tab === 'links') {
+    linkSelectMode = true;
+    linkSelectBtn.textContent = 'Cancel';
+    linkSelectBtn.classList.add('active');
+    linkList.classList.add('selection-mode');
+  } else if (tab === 'snaps') {
+    snapSelectMode = true;
+    snapSelectBtn.textContent = 'Cancel';
+    snapSelectBtn.classList.add('active');
+    grid.classList.add('selection-mode');
+  }
+  updateBulkDeleteBtn(tab);
+  if (tab === 'texts') renderTexts();
+  else if (tab === 'links') renderLinks();
+  else renderGrid();
+}
+
+function exitSelectionMode(tab) {
+  if (tab === 'texts') {
+    textSelectMode = false;
+    selectedTextIds.clear();
+    textSelectBtn.textContent = 'Select';
+    textSelectBtn.classList.remove('active');
+    textList.classList.remove('selection-mode');
+    textBulkDeleteBtn.hidden = true;
+  } else if (tab === 'links') {
+    linkSelectMode = false;
+    selectedLinkIds.clear();
+    linkSelectBtn.textContent = 'Select';
+    linkSelectBtn.classList.remove('active');
+    linkList.classList.remove('selection-mode');
+    linkBulkDeleteBtn.hidden = true;
+  } else if (tab === 'snaps') {
+    snapSelectMode = false;
+    selectedSnapIds.clear();
+    snapSelectBtn.textContent = 'Select';
+    snapSelectBtn.classList.remove('active');
+    grid.classList.remove('selection-mode');
+    snapBulkDeleteBtn.hidden = true;
+  }
+  if (tab === 'texts') renderTexts();
+  else if (tab === 'links') renderLinks();
+  else renderGrid();
+}
+
+function toggleSelectionMode(tab) {
+  if (tab === 'texts') {
+    if (textSelectMode) exitSelectionMode('texts');
+    else enterSelectionMode('texts');
+  } else if (tab === 'links') {
+    if (linkSelectMode) exitSelectionMode('links');
+    else enterSelectionMode('links');
+  } else if (tab === 'snaps') {
+    if (snapSelectMode) exitSelectionMode('snaps');
+    else enterSelectionMode('snaps');
+  }
+}
+
+function wireItemSelection(item, entry, tab) {
+  const cb = item.querySelector('.item-select');
+  const set = tab === 'texts' ? selectedTextIds
+    : tab === 'links' ? selectedLinkIds
+    : selectedSnapIds;
+  cb.checked = set.has(entry.id);
+  item.classList.toggle('selected', cb.checked);
+  cb.addEventListener('change', () => {
+    if (cb.checked) set.add(entry.id);
+    else set.delete(entry.id);
+    item.classList.toggle('selected', cb.checked);
+    updateBulkDeleteBtn(tab);
+  });
+  cb.addEventListener('click', e => e.stopPropagation());
+}
+
+function clearUndo() {
+  if (undoTimer) clearTimeout(undoTimer);
+  undoTimer = null;
+  undoPending = null;
+  toastAction.hidden = true;
+  toastAction.onclick = null;
+  toast.classList.remove('interactive');
+}
+
+function scheduleUndo(payload) {
+  clearUndo();
+  undoPending = payload;
+  undoTimer = setTimeout(clearUndo, UNDO_MS);
+}
+
+async function performUndo() {
+  if (!undoPending) return;
+  const { type, items } = undoPending;
+  clearUndo();
+  toast.classList.remove('show');
+  if (type === 'texts') {
+    await send('RESTORE_TEXTS', { items });
+    showToast(items.length === 1 ? 'Text restored' : `${items.length} texts restored`);
+  } else if (type === 'bookmarks') {
+    await send('RESTORE_BOOKMARKS', { items });
+    showToast(items.length === 1 ? 'Link restored' : `${items.length} links restored`);
+  } else if (type === 'screenshots') {
+    await send('RESTORE_SCREENSHOTS', { items });
+    showToast(items.length === 1 ? 'Screenshot restored' : `${items.length} screenshots restored`);
+  }
+}
+
+async function deleteScreenshotsWithUndo(ids) {
+  const idSet = new Set(ids);
+  const removed = screenshots.filter(s => idSet.has(s.id));
+  if (!removed.length) return;
+  if (currentShot && idSet.has(currentShot.id)) closeLightbox();
+  await send('DELETE_SCREENSHOTS', { ids: [...idSet] });
+  scheduleUndo({ type: 'screenshots', items: removed });
+  const label = removed.length === 1 ? 'Screenshot deleted' : `${removed.length} screenshots deleted`;
+  showToast(label, { undo: true });
+  selectedSnapIds.clear();
+  if (snapSelectMode) exitSelectionMode('snaps');
+}
+
+async function deleteTextsWithUndo(ids) {
+  const idSet = new Set(ids);
+  const removed = texts.filter(t => idSet.has(t.id));
+  if (!removed.length) return;
+  await send('DELETE_TEXTS', { ids: [...idSet] });
+  scheduleUndo({ type: 'texts', items: removed });
+  const label = removed.length === 1 ? 'Text deleted' : `${removed.length} texts deleted`;
+  showToast(label, { undo: true });
+  selectedTextIds.clear();
+  if (textSelectMode) exitSelectionMode('texts');
+}
+
+async function deleteBookmarksWithUndo(ids) {
+  const idSet = new Set(ids);
+  const removed = bookmarks.filter(b => idSet.has(b.id));
+  if (!removed.length) return;
+  await send('DELETE_BOOKMARKS', { ids: [...idSet] });
+  scheduleUndo({ type: 'bookmarks', items: removed });
+  const label = removed.length === 1 ? 'Link deleted' : `${removed.length} links deleted`;
+  showToast(label, { undo: true });
+  selectedLinkIds.clear();
+  if (linkSelectMode) exitSelectionMode('links');
+}
+
+function linkHostname(url) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url);
+    return u.hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function linkFaviconUrl(entry) {
+  if (entry.faviconUrl) return entry.faviconUrl;
+  const host = linkHostname(entry.url);
+  return `https://www.google.com/s2/favicons?domain=${host}&sz=32`;
+}
+
+function applyLinkPreview(item, entry) {
+  const favicon = item.querySelector('.link-favicon');
+  const titleEl = item.querySelector('.link-title');
+  const urlEl   = item.querySelector('.link-url');
+  const hasTitle = Boolean(entry.title && entry.title !== linkHostname(entry.url));
+  item.classList.toggle('has-title', hasTitle);
+  favicon.src = linkFaviconUrl(entry);
+  favicon.alt = hasTitle ? entry.title : linkHostname(entry.url);
+  if (hasTitle) {
+    titleEl.textContent = entry.title;
+    urlEl.textContent = prettyUrl(entry.url);
+  } else {
+    titleEl.textContent = '';
+    urlEl.textContent = prettyUrl(entry.url);
+  }
+}
+
+async function backfillLinkPreviews() {
+  const stale = bookmarks.filter(b => !b.previewFetchedAt);
+  for (const b of stale.slice(0, 8)) {
+    send('FETCH_LINK_PREVIEW', { id: b.id, url: b.url }).catch(() => {});
+  }
+}
+
+textSearchInput.addEventListener('input', () => {
+  textSearchQuery = textSearchInput.value;
+  renderTexts();
+});
+textSortSelect.addEventListener('change', () => {
+  textSortOrder = textSortSelect.value;
+  renderTexts();
+});
+linkSearchInput.addEventListener('input', () => {
+  linkSearchQuery = linkSearchInput.value;
+  renderLinks();
+});
+linkSortSelect.addEventListener('change', () => {
+  linkSortOrder = linkSortSelect.value;
+  renderLinks();
+});
+textSelectBtn.addEventListener('click', () => toggleSelectionMode('texts'));
+linkSelectBtn.addEventListener('click', () => toggleSelectionMode('links'));
+snapSelectBtn.addEventListener('click', () => toggleSelectionMode('snaps'));
+textBulkDeleteBtn.addEventListener('click', async () => {
+  if (!selectedTextIds.size) return;
+  if (!confirm(`Delete ${selectedTextIds.size} selected text(s)?`)) return;
+  await deleteTextsWithUndo([...selectedTextIds]);
+});
+linkBulkDeleteBtn.addEventListener('click', async () => {
+  if (!selectedLinkIds.size) return;
+  if (!confirm(`Delete ${selectedLinkIds.size} selected link(s)?`)) return;
+  await deleteBookmarksWithUndo([...selectedLinkIds]);
+});
+snapBulkDeleteBtn.addEventListener('click', async () => {
+  if (!selectedSnapIds.size) return;
+  if (!confirm(`Delete ${selectedSnapIds.size} selected screenshot(s)?`)) return;
+  await deleteScreenshotsWithUndo([...selectedSnapIds]);
+});
+toastAction.addEventListener('click', e => {
+  e.stopPropagation();
+  performUndo();
+});
 
 // ── Render (Texts) ──────────────────────────────────────────────────────────
 function renderTexts() {
   const known = new Set([...textList.children].map(c => c.dataset.id));
   textList.innerHTML = '';
 
-  // Pinned entries live in the docked bottom drawer, not the main list.
-  const unpinned = texts.filter(t => !t.pinned);
-  const hasAny = texts.length > 0;
-  emptyStateTexts.style.display = hasAny ? 'none' : '';
-  textList.style.display        = unpinned.length ? '' : 'none';
+  const visible  = getVisibleTexts();
+  const hasAny   = texts.length > 0;
+  const q        = textSearchQuery.trim();
+  const showNoMatch = q.length > 0 && visible.length === 0;
 
-  unpinned.forEach((entry) => {
+  emptyStateTexts.style.display = (!hasAny && !q) ? '' : 'none';
+  emptyStateTextsFiltered.classList.toggle('show', showNoMatch);
+  textList.style.display = visible.length ? '' : 'none';
+
+  visible.forEach((entry) => {
     textList.appendChild(buildTextCard(entry, !known.has(entry.id)));
   });
 }
@@ -716,12 +1039,17 @@ function buildTextCard(entry, isNew) {
   pinBtn.title = entry.pinned ? 'Unpin' : 'Pin';
   pinBtn.classList.toggle('active', !!entry.pinned);
 
-  item.querySelector('.text-body').addEventListener('click', () => copyText(entry));
+  item.querySelector('.text-body').addEventListener('click', () => {
+    if (textSelectMode) return;
+    copyText(entry);
+  });
   pinBtn.addEventListener('click', e => { e.stopPropagation(); toggleTextPin(entry.id); });
   item.querySelector('.text-delete-btn').addEventListener('click', e => {
     e.stopPropagation();
     deleteText(entry.id);
   });
+
+  if (textSelectMode) wireItemSelection(item, entry, 'texts');
 
   return item;
 }
@@ -756,13 +1084,16 @@ function renderLinks() {
   const known = new Set([...linkList.children].map(c => c.dataset.id));
   linkList.innerHTML = '';
 
-  // Pinned links live in the docked bottom drawer, not the main list.
-  const unpinned = bookmarks.filter(b => !b.pinned);
-  const hasAny = bookmarks.length > 0;
-  emptyStateLinks.style.display = hasAny ? 'none' : '';
-  linkList.style.display        = unpinned.length ? '' : 'none';
+  const visible  = getVisibleBookmarks();
+  const hasAny   = bookmarks.length > 0;
+  const q        = linkSearchQuery.trim();
+  const showNoMatch = q.length > 0 && visible.length === 0;
 
-  unpinned.forEach((entry) => {
+  emptyStateLinks.style.display = (!hasAny && !q) ? '' : 'none';
+  emptyStateLinksFiltered.classList.toggle('show', showNoMatch);
+  linkList.style.display = visible.length ? '' : 'none';
+
+  visible.forEach((entry) => {
     linkList.appendChild(buildBookmarkCard(entry, !known.has(entry.id)));
   });
 }
@@ -776,14 +1107,17 @@ function buildBookmarkCard(entry, isNew) {
   if (isNew) item.classList.add('entering');
   item.classList.toggle('pinned', !!entry.pinned);
 
-  item.querySelector('.link-url').textContent = prettyUrl(entry.url);
+  applyLinkPreview(item, entry);
   item.querySelector('.text-time').textContent = formatTime(entry.savedAt);
 
   const pinBtn = item.querySelector('.link-pin-btn');
   pinBtn.title = entry.pinned ? 'Unpin' : 'Pin';
   pinBtn.classList.toggle('active', !!entry.pinned);
 
-  item.querySelector('.link-body').addEventListener('click', () => copyBookmark(entry));
+  item.querySelector('.link-body').addEventListener('click', () => {
+    if (linkSelectMode) return;
+    copyBookmark(entry);
+  });
   pinBtn.addEventListener('click', e => { e.stopPropagation(); toggleBookmarkPin(entry.id); });
   item.querySelector('.link-open-btn').addEventListener('click', e => {
     e.stopPropagation();
@@ -793,6 +1127,8 @@ function buildBookmarkCard(entry, isNew) {
     e.stopPropagation();
     deleteBookmark(entry.id);
   });
+
+  if (linkSelectMode) wireItemSelection(item, entry, 'links');
 
   return item;
 }
@@ -810,7 +1146,8 @@ function prettyUrl(url) {
 // ── Actions (Snaps) ─────────────────────────────────────────────────────────
 async function copyToClipboard(shot) {
   try {
-    const res  = await fetch(shot.dataUrl);
+    const dataUrl = await getShotDataUrl(shot);
+    const res  = await fetch(dataUrl);
     const blob = await res.blob();
     await navigator.clipboard.write([
       new ClipboardItem({ [blob.type]: blob })
@@ -822,16 +1159,17 @@ async function copyToClipboard(shot) {
 }
 
 function downloadImage(shot) {
-  const a    = document.createElement('a');
-  a.href     = shot.dataUrl;
-  a.download = `screenshot-${shot.savedAt}.png`;
-  a.click();
-  showToast('Saving image...');
+  getShotDataUrl(shot).then(dataUrl => {
+    const a    = document.createElement('a');
+    a.href     = dataUrl;
+    a.download = `screenshot-${shot.savedAt}.png`;
+    a.click();
+    showToast('Saving image...');
+  });
 }
 
 async function deleteScreenshot(id) {
-  if (currentShot && currentShot.id === id) closeLightbox();
-  await send('DELETE_SCREENSHOT', { id }); // storage.onChanged re-renders.
+  await deleteScreenshotsWithUndo([id]);
 }
 
 // ── Actions (Texts) ─────────────────────────────────────────────────────────
@@ -847,7 +1185,7 @@ async function copyText(entry) {
 }
 
 async function deleteText(id) {
-  await send('DELETE_TEXT', { id }); // storage.onChanged re-renders.
+  await deleteTextsWithUndo([id]);
 }
 
 async function toggleTextPin(id) {
@@ -909,7 +1247,7 @@ async function toggleBookmarkPin(id) {
 }
 
 async function deleteBookmark(id) {
-  await send('DELETE_BOOKMARK', { id }); // storage.onChanged re-renders.
+  await deleteBookmarksWithUndo([id]);
 }
 
 // Pull text sitting on the clipboard when the popup opens (covers text copied
@@ -926,12 +1264,159 @@ async function captureTextFromClipboard() {
 }
 window.addEventListener('focus', captureTextFromClipboard);
 
-// ── Lightbox / Preview ─────────────────────────────────────────────────────
+// ── Lightbox / Preview + Annotations ─────────────────────────────────────────
 let currentShot = null;
+let annotationTool = 'pen';
+let annotationStrokes = [];
+let annotationDraft = null;
+let annotationDirty = false;
+let movingTextIdx = -1;
+let moveDragOffset = { x: 0, y: 0 };
+
+function parseAnnotations(shot) {
+  if (!shot?.annotations) return { strokes: [], displayW: 0, displayH: 0 };
+  try {
+    const data = typeof shot.annotations === 'string' ? JSON.parse(shot.annotations) : shot.annotations;
+    return {
+      strokes: Array.isArray(data.strokes) ? data.strokes : [],
+      displayW: data.displayW || 0,
+      displayH: data.displayH || 0
+    };
+  } catch {
+    return { strokes: [], displayW: 0, displayH: 0 };
+  }
+}
+
+function resizeAnnotationCanvas() {
+  if (!lightboxImg.naturalWidth || !lightboxImgwrap) return;
+  const maxW = lightboxImgwrap.clientWidth - 20;
+  const maxH = lightboxImgwrap.clientHeight - 20;
+  const ratio = lightboxImg.naturalWidth / lightboxImg.naturalHeight;
+  let w = maxW;
+  let h = w / ratio;
+  if (h > maxH) {
+    h = maxH;
+    w = h * ratio;
+  }
+  w = Math.max(1, Math.floor(w));
+  h = Math.max(1, Math.floor(h));
+  lightboxImg.style.width = `${w}px`;
+  lightboxImg.style.height = `${h}px`;
+  lightboxCanvas.width = w;
+  lightboxCanvas.height = h;
+  lightboxCanvasStack.style.width = `${w}px`;
+  lightboxCanvasStack.style.height = `${h}px`;
+  redrawAnnotations();
+}
+
+function canvasPoint(e) {
+  const rect = lightboxCanvas.getBoundingClientRect();
+  const scaleX = lightboxCanvas.width / rect.width;
+  const scaleY = lightboxCanvas.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY
+  };
+}
+
+function redrawAnnotations() {
+  const ctx = lightboxCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, lightboxCanvas.width, lightboxCanvas.height);
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--accent-400').trim() || '#38bdf8';
+
+  for (const stroke of annotationStrokes) {
+    drawStroke(ctx, stroke, color);
+  }
+
+  if (annotationDraft?.type === 'pen' && annotationDraft.points?.length > 1) {
+    drawStroke(ctx, annotationDraft, color);
+  } else if (annotationDraft?.type === 'arrow') {
+    drawArrow(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, color, 3);
+  }
+}
+
+function drawStroke(ctx, stroke, color) {
+  if (stroke.type === 'pen' && stroke.points?.length > 1) {
+    ctx.strokeStyle = stroke.color || color;
+    ctx.lineWidth = stroke.width || 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+    for (let i = 1; i < stroke.points.length; i++) {
+      ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    }
+    ctx.stroke();
+  } else if (stroke.type === 'arrow') {
+    drawArrow(ctx, stroke.x1, stroke.y1, stroke.x2, stroke.y2, stroke.color || color, stroke.width || 3);
+  } else if (stroke.type === 'text' && stroke.text) {
+    ctx.font = `600 ${stroke.size || 16}px system-ui, sans-serif`;
+    ctx.fillStyle = stroke.color || color;
+    ctx.fillText(stroke.text, stroke.x, stroke.y);
+  }
+}
+
+function drawArrow(ctx, x1, y1, x2, y2, color, width) {
+  const head = Math.max(10, width * 4);
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - head * Math.cos(angle - Math.PI / 6), y2 - head * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(x2 - head * Math.cos(angle + Math.PI / 6), y2 - head * Math.sin(angle + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+}
+
+function hitTestTextStroke(p) {
+  const ctx = lightboxCanvas.getContext('2d');
+  if (!ctx) return -1;
+  for (let i = annotationStrokes.length - 1; i >= 0; i--) {
+    const s = annotationStrokes[i];
+    if (s.type !== 'text' || !s.text) continue;
+    const size = s.size || 16;
+    ctx.font = `600 ${size}px system-ui, sans-serif`;
+    const w = ctx.measureText(s.text).width;
+    const pad = 6;
+    if (p.x >= s.x - pad && p.x <= s.x + w + pad && p.y >= s.y - size - pad && p.y <= s.y + pad) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function setAnnotationTool(tool) {
+  annotationTool = tool;
+  movingTextIdx = -1;
+  [annotatePen, annotateArrow, annotateText, annotateMove].forEach(btn => btn.classList.remove('active'));
+  if (tool === 'pen') annotatePen.classList.add('active');
+  if (tool === 'arrow') annotateArrow.classList.add('active');
+  if (tool === 'text') annotateText.classList.add('active');
+  if (tool === 'move') annotateMove.classList.add('active');
+  lightboxCanvas.classList.toggle('move-mode', tool === 'move');
+}
 
 function openLightbox(shot) {
   currentShot = shot;
+  lightboxImg.onload = () => {
+    resizeAnnotationCanvas();
+    requestAnimationFrame(resizeAnnotationCanvas);
+  };
   lightboxImg.src = shot.dataUrl;
+  const parsed = parseAnnotations(shot);
+  annotationStrokes = parsed.strokes;
+  annotationDraft = null;
+  annotationDirty = false;
+  movingTextIdx = -1;
+  setAnnotationTool('pen');
   lightboxTime.textContent = formatTime(shot.savedAt);
   lightbox.classList.add('open');
   lightbox.setAttribute('aria-hidden', 'false');
@@ -941,7 +1426,76 @@ function closeLightbox() {
   lightbox.classList.remove('open');
   lightbox.setAttribute('aria-hidden', 'true');
   currentShot = null;
+  annotationStrokes = [];
+  annotationDraft = null;
+  annotationDirty = false;
+  lightboxImg.onload = null;
   lightboxImg.removeAttribute('src');
+  const ctx = lightboxCanvas.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, lightboxCanvas.width, lightboxCanvas.height);
+}
+
+async function saveAnnotations() {
+  if (!currentShot) return;
+  const payload = JSON.stringify({
+    version: 1,
+    displayW: lightboxCanvas.width,
+    displayH: lightboxCanvas.height,
+    strokes: annotationStrokes
+  });
+  await send('UPDATE_SCREENSHOT', { id: currentShot.id, patch: { annotations: payload } });
+  currentShot = { ...currentShot, annotations: payload };
+  screenshots = screenshots.map(s => s.id === currentShot.id ? currentShot : s);
+  annotationDirty = false;
+  showToast('Annotations saved');
+}
+
+async function getShotDataUrl(shot) {
+  const parsed = parseAnnotations(shot);
+  if (!parsed.strokes.length) return shot.dataUrl;
+  return flattenAnnotatedImage(shot, parsed);
+}
+
+async function flattenAnnotatedImage(shot, parsed) {
+  const strokes = parsed?.strokes || parseAnnotations(shot).strokes;
+  const img = new Image();
+  img.src = shot.dataUrl;
+  await img.decode();
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const refW = parsed?.displayW || lightboxCanvas.width || img.naturalWidth;
+  const refH = parsed?.displayH || lightboxCanvas.height || img.naturalHeight;
+  const scaleX = img.naturalWidth / refW;
+  const scaleY = img.naturalHeight / refH;
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--accent-400').trim() || '#38bdf8';
+
+  for (const stroke of strokes) {
+    if (stroke.type === 'pen') {
+      drawStroke(ctx, {
+        ...stroke,
+        points: stroke.points.map(p => ({ x: p.x * scaleX, y: p.y * scaleY })),
+        width: (stroke.width || 3) * scaleX
+      }, color);
+    } else if (stroke.type === 'arrow') {
+      drawStroke(ctx, {
+        ...stroke,
+        x1: stroke.x1 * scaleX, y1: stroke.y1 * scaleY,
+        x2: stroke.x2 * scaleX, y2: stroke.y2 * scaleY,
+        width: (stroke.width || 3) * scaleX
+      }, color);
+    } else if (stroke.type === 'text') {
+      drawStroke(ctx, {
+        ...stroke,
+        x: stroke.x * scaleX,
+        y: stroke.y * scaleY,
+        size: (stroke.size || 16) * scaleY
+      }, color);
+    }
+  }
+  return canvas.toDataURL('image/png');
 }
 
 lightboxClose.addEventListener('click', closeLightbox);
@@ -952,12 +1506,98 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && lightbox.classList.contains('open')) closeLightbox();
 });
 
+annotatePen.addEventListener('click', () => setAnnotationTool('pen'));
+annotateArrow.addEventListener('click', () => setAnnotationTool('arrow'));
+annotateText.addEventListener('click', () => setAnnotationTool('text'));
+annotateMove.addEventListener('click', () => setAnnotationTool('move'));
+annotateUndo.addEventListener('click', () => {
+  if (!annotationStrokes.length) return;
+  annotationStrokes.pop();
+  annotationDirty = true;
+  redrawAnnotations();
+});
+annotateSave.addEventListener('click', () => saveAnnotations());
+
+lightboxCanvas.addEventListener('pointerdown', e => {
+  if (!currentShot) return;
+  lightboxCanvas.setPointerCapture(e.pointerId);
+  const p = canvasPoint(e);
+  if (annotationTool === 'move') {
+    const idx = hitTestTextStroke(p);
+    if (idx >= 0) {
+      movingTextIdx = idx;
+      const s = annotationStrokes[idx];
+      moveDragOffset = { x: p.x - s.x, y: p.y - s.y };
+      lightboxCanvas.classList.add('dragging');
+    }
+    return;
+  }
+  if (annotationTool === 'pen') {
+    annotationDraft = { type: 'pen', points: [p], color: null, width: 3 };
+  } else if (annotationTool === 'arrow') {
+    annotationDraft = { type: 'arrow', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: null, width: 3 };
+  } else if (annotationTool === 'text') {
+    const label = prompt('Label text');
+    if (label?.trim()) {
+      annotationStrokes.push({ type: 'text', text: label.trim(), x: p.x, y: p.y, size: 16 });
+      annotationDirty = true;
+      redrawAnnotations();
+    }
+  }
+});
+
+lightboxCanvas.addEventListener('pointermove', e => {
+  const p = canvasPoint(e);
+  if (movingTextIdx >= 0) {
+    const s = annotationStrokes[movingTextIdx];
+    s.x = p.x - moveDragOffset.x;
+    s.y = p.y - moveDragOffset.y;
+    annotationDirty = true;
+    redrawAnnotations();
+    return;
+  }
+  if (!annotationDraft) return;
+  if (annotationDraft.type === 'pen') {
+    annotationDraft.points.push(p);
+    redrawAnnotations();
+  } else if (annotationDraft.type === 'arrow') {
+    annotationDraft.x2 = p.x;
+    annotationDraft.y2 = p.y;
+    redrawAnnotations();
+  }
+});
+
+lightboxCanvas.addEventListener('pointerup', () => {
+  if (movingTextIdx >= 0) {
+    movingTextIdx = -1;
+    lightboxCanvas.classList.remove('dragging');
+    return;
+  }
+  if (!annotationDraft) return;
+  if (annotationDraft.type === 'pen' && annotationDraft.points.length > 1) {
+    annotationStrokes.push({ ...annotationDraft, points: [...annotationDraft.points] });
+  } else if (annotationDraft.type === 'arrow') {
+    annotationStrokes.push({ ...annotationDraft });
+  }
+  annotationDraft = null;
+  annotationDirty = true;
+  redrawAnnotations();
+});
+
 // ── Toast ─────────────────────────────────────────────────────────────────
-function showToast(msg) {
-  toast.textContent = msg;
+function showToast(msg, opts = {}) {
+  toastMsg.textContent = msg;
+  if (opts.undo && undoPending) {
+    toastAction.hidden = false;
+    toast.classList.add('interactive');
+  } else if (!opts.undo) {
+    toastAction.hidden = true;
+    toast.classList.remove('interactive');
+  }
   toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+  const duration = opts.undo ? UNDO_MS : (opts.duration || 2000);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), duration);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

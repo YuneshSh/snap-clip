@@ -561,11 +561,12 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 .toast {
   position: fixed;
   bottom: 12px; left: 50%; transform: translateX(-50%) translateY(8px);
+  display: inline-flex; align-items: center; gap: 10px;
   background: var(--surface-3);
   color: var(--text);
   border: 1px solid var(--border-strong);
   font-size: 12px; font-weight: 500;
-  padding: 8px 15px;
+  padding: 8px 12px 8px 15px;
   border-radius: 99px;
   white-space: nowrap;
   pointer-events: none;
@@ -574,7 +575,110 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   transition: opacity 200ms ease, transform 200ms ease;
   z-index: 100;
 }
+.toast.interactive { pointer-events: auto; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast-action {
+  border: none;
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--accent-400);
+  font-family: inherit;
+  font-size: 11px; font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.toast-action:hover { background: rgba(var(--accent-rgb), 0.28); }
+
+/* ── List toolbar (search / filter / bulk) ── */
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.list-search {
+  flex: 1;
+  min-width: 120px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.list-search:focus {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12);
+}
+.list-search::placeholder { color: var(--text-dim); }
+.list-filter {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toolbar-btn {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.toolbar-btn:hover { background: var(--surface-3); color: var(--text); }
+.toolbar-btn.active {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent-400);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+.toolbar-btn.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--red-400);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+.toolbar-btn.danger:hover { background: rgba(239, 68, 68, 0.2); }
+.empty-filtered { padding: 28px 24px; }
+.empty-filtered .empty-icon { display: none; }
+.empty-filtered:not(.show) { display: none !important; }
+.snaps-toolbar { justify-content: flex-end; }
+
+/* Selection mode */
+.item-select-wrap {
+  display: none;
+  align-items: center;
+  padding: 0 0 0 8px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.selection-mode .item-select-wrap { display: flex; }
+.item-select {
+  width: 14px; height: 14px;
+  accent-color: var(--accent-500);
+  cursor: pointer;
+}
+.text-item.selected,
+.link-item.selected {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.2);
+}
 
 /* ── Tabs ── */
 .tabs {
@@ -653,6 +757,9 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 /* ── Card (framed photo look) ── */
 .card {
   min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -664,6 +771,13 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
   border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* The image sits inside a recessed mat, giving a clear frame around each shot. */
@@ -771,7 +885,8 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 
 .text-item {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
@@ -782,6 +897,13 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
   border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.text-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .text-body {
@@ -858,6 +980,9 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 }
 
 .link-item {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
@@ -874,6 +999,13 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.08), var(--surface));
 }
 
+.link-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .link-body {
   display: flex; align-items: center; gap: 8px;
   width: 100%;
@@ -884,15 +1016,38 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   padding: 10px 11px;
   position: relative;
 }
-.link-icon { width: 15px; height: 15px; color: var(--accent-400); flex-shrink: 0; }
-.link-url {
+.link-favicon {
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.06);
+}
+.link-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.link-title {
   font-size: 12.5px;
+  font-weight: 600;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
+}
+.link-url {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.link-item:not(.has-title) .link-url {
+  font-size: 12.5px;
+  color: var(--text);
 }
 
 .link-actions { display: flex; align-items: center; gap: 1px; }
@@ -1087,8 +1242,9 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 .lightbox-panel {
   position: relative;
   display: flex; flex-direction: column;
-  width: calc(100% - 24px);
-  max-height: calc(100% - 24px);
+  width: calc(100% - 12px);
+  height: calc(100% - 12px);
+  max-height: calc(var(--popup-height) - 12px);
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -1109,6 +1265,44 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 }
 .lightbox-bar-actions { display: flex; align-items: center; gap: 2px; }
 
+.lightbox-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  flex-wrap: wrap;
+}
+.annotate-tool {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.annotate-tool:hover { background: var(--surface-3); color: var(--text); }
+.annotate-tool.active {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent-400);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+.annotate-tool.primary {
+  margin-left: auto;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent-400);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+.annotate-tool.primary:hover {
+  background: rgba(var(--accent-rgb), 0.24);
+}
+
 .lightbox-btn {
   width: 30px; height: 30px;
   border: none; border-radius: var(--radius-sm);
@@ -1123,17 +1317,33 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 
 .lightbox-imgwrap {
   flex: 1;
+  min-height: 0;
   display: flex; align-items: center; justify-content: center;
-  padding: 14px;
+  padding: 10px;
   background:
     repeating-conic-gradient(rgba(255,255,255,0.02) 0% 25%, transparent 0% 50%) 50% / 20px 20px,
     var(--bg-2);
   overflow: auto;
 }
+.lightbox-canvas-stack {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+}
+.lightbox-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+.lightbox-canvas.move-mode { cursor: grab; }
+.lightbox-canvas.move-mode.dragging { cursor: grabbing; }
 .lightbox-img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  display: block;
+  width: auto;
+  height: auto;
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
 }
