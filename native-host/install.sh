@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
 #
-# Builds the SnapClip native clipboard host and registers it with every
-# Chromium-based browser found on this Mac.
+# Installs the SnapClip native clipboard host for your OS.
 #
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "$(uname -s)" in
+  Linux)
+    exec "$DIR/install-linux.sh"
+    ;;
+  Darwin)
+    ;;
+  *)
+    echo "On Windows, run:" >&2
+    echo "  powershell -ExecutionPolicy Bypass -File \"$DIR/install-windows.ps1\"" >&2
+    exit 1
+    ;;
+esac
+
+# ── macOS (Swift host) ───────────────────────────────────────────────────────
 HOST_NAME="com.snapclip.clipboard"
 SRC="$DIR/snapclip-clipboard-host.swift"
 BIN="$DIR/snapclip-clipboard-host"

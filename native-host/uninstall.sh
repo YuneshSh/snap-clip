@@ -5,6 +5,21 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "$(uname -s)" in
+  Linux)
+    exec "$DIR/uninstall-linux.sh"
+    ;;
+  Darwin)
+    ;;
+  *)
+    echo "On Windows, run:" >&2
+    echo "  powershell -ExecutionPolicy Bypass -File \"$DIR/uninstall-windows.ps1\"" >&2
+    exit 1
+    ;;
+esac
+
+# ── macOS ───────────────────────────────────────────────────────────────────
 HOST_NAME="com.snapclip.clipboard"
 BIN="$DIR/snapclip-clipboard-host"
 

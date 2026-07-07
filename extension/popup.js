@@ -226,7 +226,7 @@ function setNativeStatus(connected) {
   statusDot.classList.toggle('connected', !!connected);
   statusDot.title = connected
     ? 'Companion connected — capturing screenshots system-wide'
-    : 'Companion not connected — open the popup to capture, or run native-host/install.sh';
+    : 'Companion not connected — open the popup to capture, or install the native host (see native-host/README.md)';
 }
 
 // The clipboard read can be rejected if it fires before the popup has focus, so

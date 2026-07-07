@@ -4,3 +4,4 @@ node_modules/
 # Compiled native host binary (rebuilt by native-host/install.sh)
 native-host/snapclip-clipboard-host
 native-host/*.dSYM/
+native-host/__pycache__/

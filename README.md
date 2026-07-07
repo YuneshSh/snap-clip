@@ -9,19 +9,19 @@ Load `extension/` as an unpacked extension at `chrome://extensions` (enable
 Developer Mode → "Load unpacked"). The extension ID is pinned to
 `doeoikmjihhhbemlbkjohmlmcdjffoel` via the `key` in `manifest.json`.
 
-## Native companion (macOS) — back-to-back screenshot capture
+## Native companion — back-to-back screenshot capture
 
 By default the extension can only grab the clipboard while a browser tab is
-focused, so rapid screenshots taken in another app (Xnip, CleanShot,
-`Cmd-Shift-4`) get lost. The **native companion** watches the clipboard system-
-wide and streams every image into SnapClip automatically.
+focused. The **native companion** watches the clipboard system-wide and streams
+every image (and text) into SnapClip automatically.
 
-```bash
-cd native-host
-./install.sh
-```
+| OS | Install |
+|----|---------|
+| **macOS / Linux** | `cd native-host && ./install.sh` |
+| **Windows** | `cd native-host` then `powershell -ExecutionPolicy Bypass -File install-windows.ps1` |
 
-See [`native-host/README.md`](native-host/README.md) for details.
+See [`native-host/README.md`](native-host/README.md) for platform requirements
+(Python + wl-clipboard/xclip on Linux, Python + pywin32 on Windows).
 
 ## Preview (dev)
 
