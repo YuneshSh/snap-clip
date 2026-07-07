@@ -1448,29 +1448,19 @@ function setAnnotationTool(tool) {
   lightboxCanvas.classList.toggle('move-mode', tool === 'move');
 }
 
-function openLightbox(shot) {
-  currentShot = shot;
-  lightboxImg.onload = () => {
-    requestAnimationFrame(() => {
-      resizeAnnotationCanvas();
-      requestAnimationFrame(resizeAnnotationCanvas);
+async function openLightbox(shot) {
+  try {
+    const res = await send('OPEN_VIEWER', {
+      id: shot.id,
+      width: Math.round(window.screen?.availWidth * 0.92) || 1200,
+      height: Math.round(window.screen?.availHeight * 0.92) || 860
     });
-  };
-  lightboxImg.src = shot.dataUrl;
-  const parsed = parseAnnotations(shot);
-  annotationStrokes = parsed.strokes;
-  annotationDraft = null;
-  annotationDirty = false;
-  movingTextIdx = -1;
-  selectedTextIdx = -1;
-  setAnnotationTool('pen');
-  lightboxTime.textContent = formatTime(shot.savedAt);
-  lightbox.classList.add('open');
-  lightbox.setAttribute('aria-hidden', 'false');
-  requestAnimationFrame(() => {
-    resizeAnnotationCanvas();
-    requestAnimationFrame(resizeAnnotationCanvas);
-  });
+    if (res && res.success === false) {
+      showToast('Could not open preview');
+    }
+  } catch {
+    showToast('Could not open preview');
+  }
 }
 
 function closeLightbox() {

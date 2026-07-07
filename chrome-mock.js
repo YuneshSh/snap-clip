@@ -479,6 +479,13 @@ window.chrome = {
         case 'DELETE_NOTE':       return bgDeleteNote(msg.id);
         // Preview showcases the companion as connected.
         case 'GET_NATIVE_STATUS': return Promise.resolve({ connected: true });
+        case 'OPEN_VIEWER': {
+          const w = Math.min(Math.max(msg.width || 1200, 640), 1600);
+          const h = Math.min(Math.max(msg.height || 860, 480), 1200);
+          const url = `extension/viewer.html?id=${encodeURIComponent(msg.id)}&w=${w}&h=${h}`;
+          window.open(url, '_blank', `noopener,width=${w},height=${h}`);
+          return Promise.resolve({ success: true });
+        }
         default: return Promise.resolve(null);
       }
     },

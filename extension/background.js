@@ -103,6 +103,54 @@ if (chrome.alarms) {
 }
 connectNative();
 
+const viewerWindowsByShot = new Map();
+
+async function openViewerWindow(shotId, width, height) {
+  if (!shotId) return { success: false, reason: 'missing_id' };
+  const shots = await getScreenshots();
+  if (!shots.some(s => s.id === shotId)) {
+    return { success: false, reason: 'not_found' };
+  }
+
+  const existingId = viewerWindowsByShot.get(shotId);
+  if (existingId != null) {
+    try {
+      const win = await chrome.windows.get(existingId);
+      if (win) {
+        await chrome.windows.update(existingId, { focused: true, drawAttention: true });
+        return { success: true, windowId: existingId, focused: true };
+      }
+    } catch {
+      viewerWindowsByShot.delete(shotId);
+    }
+  }
+
+  const url = chrome.runtime.getURL(`viewer.html?id=${encodeURIComponent(shotId)}`);
+  const w = Math.min(Math.max(Number(width) || 1200, 640), 1600);
+  const h = Math.min(Math.max(Number(height) || 860, 480), 1200);
+
+  const win = await chrome.windows.create({
+    url,
+    type: 'popup',
+    width: w,
+    height: h,
+    focused: true
+  });
+
+  if (win?.id != null) {
+    viewerWindowsByShot.set(shotId, win.id);
+    const onRemoved = (windowId) => {
+      if (windowId === win.id) {
+        viewerWindowsByShot.delete(shotId);
+        chrome.windows.onRemoved.removeListener(onRemoved);
+      }
+    };
+    chrome.windows.onRemoved.addListener(onRemoved);
+  }
+
+  return { success: true, windowId: win?.id };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
     case 'SAVE_SCREENSHOT':
@@ -186,6 +234,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'GET_NATIVE_STATUS':
       sendResponse({ connected: nativeConnected });
       return false;
+    case 'OPEN_VIEWER':
+      openViewerWindow(message.id, message.width, message.height).then(sendResponse);
+      return true;
   }
 });
 

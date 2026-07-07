@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SnapClip — Preview</title>
+  <link rel="stylesheet" href="viewer.css" />
+</head>
+<body>
+  <div class="viewer" id="viewer">
+    <header class="viewer-bar">
+      <div class="viewer-bar-left">
+        <span class="viewer-brand">SnapClip</span>
+        <span class="viewer-time" id="viewerTime"></span>
+      </div>
+      <div class="viewer-bar-actions">
+        <button class="viewer-btn" id="viewerCopy" title="Copy to clipboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+        <button class="viewer-btn" id="viewerSave" title="Download image">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+        <button class="viewer-btn viewer-close" id="viewerClose" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="viewer-tools">
+      <button type="button" class="annotate-tool active" id="annotatePen" title="Pen">Pen</button>
+      <button type="button" class="annotate-tool" id="annotateArrow" title="Arrow">Arrow</button>
+      <button type="button" class="annotate-tool" id="annotateText" title="Text label">Text</button>
+      <button type="button" class="annotate-tool" id="annotateMove" title="Move text · ↑↓ or scroll to resize">Move</button>
+      <button type="button" class="annotate-tool" id="annotateUndo" title="Undo stroke">Undo</button>
+      <button type="button" class="annotate-tool primary" id="annotateSave" title="Save annotations">Save</button>
+    </div>
+
+    <div class="viewer-workspace" id="viewerWorkspace">
+      <div class="viewer-canvas-stack" id="viewerCanvasStack">
+        <img class="viewer-img" id="viewerImg" alt="Screenshot preview" />
+        <canvas id="viewerCanvas" class="viewer-canvas"></canvas>
+      </div>
+    </div>
+
+    <div class="viewer-empty" id="viewerEmpty" hidden>
+      <p class="viewer-empty-title">Screenshot not found</p>
+      <p class="viewer-empty-sub">It may have been deleted. Close this window and try again.</p>
+    </div>
+  </div>
+
+  <div class="viewer-toast" id="viewerToast"></div>
+  <script>
+    (function () {
+      const isExtension = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
+      function loadViewer() {
+        const s = document.createElement('script');
+        s.src = 'viewer.js';
+        document.body.appendChild(s);
+      }
+      if (isExtension) {
+        loadViewer();
+      } else {
+        const mock = document.createElement('script');
+        mock.src = '../chrome-mock.js';
+        mock.onload = loadViewer;
+        document.head.appendChild(mock);
+      }
+    })();
+  </script>
+</body>
+</html>
