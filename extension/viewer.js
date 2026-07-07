@@ -33,6 +33,34 @@ let movingTextIdx = -1;
 let selectedTextIdx = -1;
 let moveDragOffset = { x: 0, y: 0 };
 let toastTimer = null;
+let imageObjectUrl = null;
+
+function revokeImageUrl() {
+  if (imageObjectUrl) {
+    URL.revokeObjectURL(imageObjectUrl);
+    imageObjectUrl = null;
+  }
+}
+
+async function readLocal(keys) {
+  return chrome.storage.local.get(keys);
+}
+
+async function assignImageSrc(dataUrl) {
+  revokeImageUrl();
+  if (!dataUrl) throw new Error('missing image data');
+
+  // Blob URLs avoid browser limits on very long data: URLs in img src.
+  if (dataUrl.startsWith('data:image/')) {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    imageObjectUrl = URL.createObjectURL(blob);
+    viewerImg.src = imageObjectUrl;
+    return;
+  }
+
+  viewerImg.src = dataUrl;
+}
 
 function send(type, extra = {}) {
   return new Promise((resolve, reject) => {
@@ -240,7 +268,7 @@ function setAnnotationTool(tool) {
   redrawAnnotations();
 }
 
-function loadShot(shot) {
+async function loadShot(shot) {
   currentShot = shot;
   viewerEmpty.hidden = true;
   viewerWorkspace.hidden = false;
@@ -254,21 +282,31 @@ function loadShot(shot) {
   selectedTextIdx = -1;
   setAnnotationTool('pen');
 
+  viewerImg.onerror = () => {
+    showToast('Could not load screenshot');
+  };
   viewerImg.onload = () => {
     requestAnimationFrame(() => {
       resizeAnnotationCanvas();
       requestAnimationFrame(resizeAnnotationCanvas);
     });
   };
-  viewerImg.src = shot.dataUrl;
-  requestAnimationFrame(() => {
-    resizeAnnotationCanvas();
-    requestAnimationFrame(resizeAnnotationCanvas);
-  });
+
+  try {
+    await assignImageSrc(shot.dataUrl);
+    requestAnimationFrame(() => {
+      resizeAnnotationCanvas();
+      requestAnimationFrame(resizeAnnotationCanvas);
+    });
+  } catch {
+    showMissing();
+  }
 }
 
 function showMissing() {
   currentShot = null;
+  revokeImageUrl();
+  viewerImg.removeAttribute('src');
   viewerWorkspace.hidden = true;
   viewerEmpty.hidden = false;
 }
@@ -361,6 +399,17 @@ function downloadImage() {
 
 function closeViewer() {
   if (annotationDirty && !confirm('You have unsaved annotations. Close anyway?')) return;
+  revokeImageUrl();
+  if (chrome.runtime?.id && chrome.windows?.getCurrent) {
+    chrome.windows.getCurrent((win) => {
+      if (win?.id != null) {
+        chrome.windows.remove(win.id);
+      } else {
+        send('CLOSE_VIEWER').catch(() => window.close());
+      }
+    });
+    return;
+  }
   window.close();
 }
 
@@ -501,17 +550,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
     return;
   }
   try {
-    const [settings, screenshots] = await Promise.all([
-      send('GET_SETTINGS'),
-      send('GET_SCREENSHOTS')
-    ]);
-    applyTheme(settings?.theme);
-    const shot = (screenshots || []).find(s => s.id === shotId);
-    if (!shot) {
+    const data = await readLocal(['settings', 'screenshots']);
+    applyTheme(data.settings?.theme);
+    const shot = (data.screenshots || []).find(s => s.id === shotId);
+    if (!shot?.dataUrl) {
       showMissing();
       return;
     }
-    loadShot(shot);
+    await loadShot(shot);
   } catch {
     showMissing();
   }

@@ -151,6 +151,27 @@ async function openViewerWindow(shotId, width, height) {
   return { success: true, windowId: win?.id };
 }
 
+async function closeViewerWindow(windowId) {
+  try {
+    if (windowId != null) {
+      await chrome.windows.remove(windowId);
+      return { success: true };
+    }
+    return new Promise((resolve) => {
+      chrome.windows.getCurrent(async (win) => {
+        if (win?.id != null) {
+          await chrome.windows.remove(win.id);
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, reason: 'no_window' });
+        }
+      });
+    });
+  } catch {
+    return { success: false };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
     case 'SAVE_SCREENSHOT':
@@ -236,6 +257,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false;
     case 'OPEN_VIEWER':
       openViewerWindow(message.id, message.width, message.height).then(sendResponse);
+      return true;
+    case 'CLOSE_VIEWER':
+      closeViewerWindow(message.windowId).then(sendResponse);
       return true;
   }
 });
