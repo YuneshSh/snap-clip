@@ -12,6 +12,7 @@ const viewerCopy = $('viewerCopy');
 const viewerSave = $('viewerSave');
 const annotatePen = $('annotatePen');
 const annotateArrow = $('annotateArrow');
+const annotateSquare = $('annotateSquare');
 const annotateText = $('annotateText');
 const annotateSelect = $('annotateSelect');
 const annotateMove = $('annotateMove');
@@ -198,6 +199,8 @@ function redrawAnnotations() {
     drawStroke(ctx, annotationDraft, color);
   } else if (annotationDraft?.type === 'arrow') {
     drawArrow(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, color, 3);
+  } else if (annotationDraft?.type === 'square') {
+    drawRect(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, color, 3);
   }
 }
 
@@ -215,6 +218,8 @@ function drawStroke(ctx, stroke, color) {
     ctx.stroke();
   } else if (stroke.type === 'arrow') {
     drawArrow(ctx, stroke.x1, stroke.y1, stroke.x2, stroke.y2, stroke.color || color, stroke.width || 3);
+  } else if (stroke.type === 'square') {
+    drawRect(ctx, stroke.x1, stroke.y1, stroke.x2, stroke.y2, stroke.color || color, stroke.width || 3);
   } else if (stroke.type === 'text' && stroke.text) {
     ctx.font = `600 ${stroke.size || 16}px system-ui, sans-serif`;
     ctx.fillStyle = stroke.color || color;
@@ -241,6 +246,18 @@ function drawArrow(ctx, x1, y1, x2, y2, color, width) {
   ctx.fill();
 }
 
+function drawRect(ctx, x1, y1, x2, y2, color, width) {
+  const x = Math.min(x1, x2);
+  const y = Math.min(y1, y2);
+  const w = Math.abs(x2 - x1);
+  const h = Math.abs(y2 - y1);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'square';
+  ctx.lineJoin = 'miter';
+  ctx.strokeRect(x, y, Math.max(w, 1), Math.max(h, 1));
+}
+
 function getStrokeBounds(stroke) {
   if (stroke.type === 'text' && stroke.text) {
     const ctx = viewerCanvas.getContext('2d');
@@ -249,7 +266,7 @@ function getStrokeBounds(stroke) {
     const w = ctx.measureText(stroke.text).width;
     return { x: stroke.x, y: stroke.y - size, w, h: size };
   }
-  if (stroke.type === 'arrow') {
+  if (stroke.type === 'arrow' || stroke.type === 'square') {
     const minX = Math.min(stroke.x1, stroke.x2);
     const minY = Math.min(stroke.y1, stroke.y2);
     return {
@@ -330,12 +347,27 @@ function hitTestTextStroke(stroke, p) {
     p.y >= stroke.y - size - pad && p.y <= stroke.y + pad;
 }
 
+function hitTestSquareStroke(stroke, p) {
+  const threshold = (stroke.width || 3) / 2 + 8;
+  const left = Math.min(stroke.x1, stroke.x2);
+  const right = Math.max(stroke.x1, stroke.x2);
+  const top = Math.min(stroke.y1, stroke.y2);
+  const bottom = Math.max(stroke.y1, stroke.y2);
+  return (
+    distToSegment(p.x, p.y, left, top, right, top) <= threshold ||
+    distToSegment(p.x, p.y, right, top, right, bottom) <= threshold ||
+    distToSegment(p.x, p.y, right, bottom, left, bottom) <= threshold ||
+    distToSegment(p.x, p.y, left, bottom, left, top) <= threshold
+  );
+}
+
 function hitTestStroke(p) {
   for (let i = annotationStrokes.length - 1; i >= 0; i--) {
     const s = annotationStrokes[i];
     if (s.type === 'text' && hitTestTextStroke(s, p)) return i;
     if (s.type === 'pen' && hitTestPenStroke(s, p)) return i;
     if (s.type === 'arrow' && hitTestArrowStroke(s, p)) return i;
+    if (s.type === 'square' && hitTestSquareStroke(s, p)) return i;
   }
   return -1;
 }
@@ -353,7 +385,7 @@ function applyStrokeMove(stroke, snapshot, dx, dy) {
     stroke.y = snapshot.y + dy;
   } else if (snapshot.type === 'pen') {
     stroke.points = snapshot.points.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
-  } else if (snapshot.type === 'arrow') {
+  } else if (snapshot.type === 'arrow' || snapshot.type === 'square') {
     stroke.x1 = snapshot.x1 + dx;
     stroke.y1 = snapshot.y1 + dy;
     stroke.x2 = snapshot.x2 + dx;
@@ -371,7 +403,7 @@ function adjustStrokeSize(idx, delta) {
     const next = Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, cur + delta));
     if (next === cur) return;
     s.size = next;
-  } else if (s.type === 'pen' || s.type === 'arrow') {
+  } else if (s.type === 'pen' || s.type === 'arrow' || s.type === 'square') {
     const cur = s.width || 3;
     const next = Math.min(STROKE_WIDTH_MAX, Math.max(STROKE_WIDTH_MIN, cur + delta));
     if (next === cur) return;
@@ -474,9 +506,10 @@ function setAnnotationTool(tool) {
   moveStartPoint = null;
   moveSnapshot = null;
   if (tool !== 'select' && tool !== 'move') selectedStrokeIdx = -1;
-  [annotatePen, annotateArrow, annotateText, annotateSelect, annotateMove].forEach(btn => btn.classList.remove('active'));
+  [annotatePen, annotateArrow, annotateSquare, annotateText, annotateSelect, annotateMove].forEach(btn => btn.classList.remove('active'));
   if (tool === 'pen') annotatePen.classList.add('active');
   if (tool === 'arrow') annotateArrow.classList.add('active');
+  if (tool === 'square') annotateSquare.classList.add('active');
   if (tool === 'text') annotateText.classList.add('active');
   if (tool === 'select') annotateSelect.classList.add('active');
   if (tool === 'move') annotateMove.classList.add('active');
@@ -551,7 +584,7 @@ async function flattenAnnotatedImage(shot, parsed) {
         points: stroke.points.map(p => ({ x: p.x * scaleX, y: p.y * scaleY })),
         width: (stroke.width || 3) * scaleX
       }, color);
-    } else if (stroke.type === 'arrow') {
+    } else if (stroke.type === 'arrow' || stroke.type === 'square') {
       drawStroke(ctx, {
         ...stroke,
         x1: stroke.x1 * scaleX, y1: stroke.y1 * scaleY,
@@ -633,6 +666,7 @@ viewerSave.addEventListener('click', downloadImage);
 
 annotatePen.addEventListener('click', () => setAnnotationTool('pen'));
 annotateArrow.addEventListener('click', () => setAnnotationTool('arrow'));
+annotateSquare.addEventListener('click', () => setAnnotationTool('square'));
 annotateText.addEventListener('click', () => setAnnotationTool('text'));
 annotateSelect.addEventListener('click', () => setAnnotationTool('select'));
 annotateMove.addEventListener('click', () => setAnnotationTool('move'));
@@ -699,6 +733,8 @@ viewerCanvas.addEventListener('pointerdown', e => {
     annotationDraft = { type: 'pen', points: [p], color: null, width: 3 };
   } else if (annotationTool === 'arrow') {
     annotationDraft = { type: 'arrow', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: null, width: 3 };
+  } else if (annotationTool === 'square') {
+    annotationDraft = { type: 'square', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: null, width: 3 };
   } else if (annotationTool === 'text') {
     const label = prompt('Label text');
     if (label?.trim()) {
@@ -723,7 +759,7 @@ viewerCanvas.addEventListener('pointermove', e => {
   if (annotationDraft.type === 'pen') {
     annotationDraft.points.push(p);
     redrawAnnotations();
-  } else if (annotationDraft.type === 'arrow') {
+  } else if (annotationDraft.type === 'arrow' || annotationDraft.type === 'square') {
     annotationDraft.x2 = p.x;
     annotationDraft.y2 = p.y;
     redrawAnnotations();
@@ -761,6 +797,10 @@ viewerCanvas.addEventListener('pointerup', () => {
     annotationStrokes.push({ ...annotationDraft, points: [...annotationDraft.points] });
   } else if (annotationDraft.type === 'arrow') {
     annotationStrokes.push({ ...annotationDraft });
+  } else if (annotationDraft.type === 'square') {
+    const w = Math.abs(annotationDraft.x2 - annotationDraft.x1);
+    const h = Math.abs(annotationDraft.y2 - annotationDraft.y1);
+    if (w > 3 || h > 3) annotationStrokes.push({ ...annotationDraft });
   }
   annotationDraft = null;
   markAnnotationsChanged();
