@@ -129,13 +129,15 @@ async function openViewerWindow(shotId, width, height) {
   const w = Math.max(Number(width) || 1200, 640);
   const h = Math.max(Number(height) || 860, 480);
 
+  // Popup windows don't support state:'maximized' — use full requested size instead.
   const win = await chrome.windows.create({
     url,
     type: 'popup',
     width: w,
     height: h,
-    focused: true,
-    state: 'maximized'
+    left: 0,
+    top: 0,
+    focused: true
   });
 
   if (win?.id != null) {
