@@ -21,6 +21,9 @@ const THEMES = ['ocean', 'violet', 'fuchsia', 'mint', 'sunset', 'coral', 'indigo
 const TEXT_SIZE_MIN = 10;
 const TEXT_SIZE_MAX = 96;
 const TEXT_SIZE_STEP = 2;
+const STROKE_WIDTH_MIN = 1;
+const STROKE_WIDTH_MAX = 24;
+const STROKE_WIDTH_STEP = 1;
 
 const shotId = new URLSearchParams(location.search).get('id');
 
@@ -29,9 +32,10 @@ let annotationTool = 'pen';
 let annotationStrokes = [];
 let annotationDraft = null;
 let annotationDirty = false;
-let movingTextIdx = -1;
-let selectedTextIdx = -1;
-let moveDragOffset = { x: 0, y: 0 };
+let movingStrokeIdx = -1;
+let selectedStrokeIdx = -1;
+let moveStartPoint = null;
+let moveSnapshot = null;
 let toastTimer = null;
 let imageObjectUrl = null;
 
@@ -178,8 +182,8 @@ function redrawAnnotations() {
 
   for (let i = 0; i < annotationStrokes.length; i++) {
     drawStroke(ctx, annotationStrokes[i], color);
-    if (annotationTool === 'move' && i === selectedTextIdx) {
-      drawTextSelection(ctx, annotationStrokes[i], color);
+    if (annotationTool === 'move' && i === selectedStrokeIdx) {
+      drawStrokeSelection(ctx, annotationStrokes[i], color);
     }
   }
 
@@ -230,54 +234,155 @@ function drawArrow(ctx, x1, y1, x2, y2, color, width) {
   ctx.fill();
 }
 
-function drawTextSelection(ctx, stroke, color) {
-  if (stroke.type !== 'text' || !stroke.text) return;
-  const size = stroke.size || 16;
-  ctx.font = `600 ${size}px system-ui, sans-serif`;
-  const w = ctx.measureText(stroke.text).width;
-  const pad = 4;
+function getStrokeBounds(stroke) {
+  if (stroke.type === 'text' && stroke.text) {
+    const ctx = viewerCanvas.getContext('2d');
+    const size = stroke.size || 16;
+    ctx.font = `600 ${size}px system-ui, sans-serif`;
+    const w = ctx.measureText(stroke.text).width;
+    return { x: stroke.x, y: stroke.y - size, w, h: size };
+  }
+  if (stroke.type === 'arrow') {
+    const minX = Math.min(stroke.x1, stroke.x2);
+    const minY = Math.min(stroke.y1, stroke.y2);
+    return {
+      x: minX,
+      y: minY,
+      w: Math.abs(stroke.x2 - stroke.x1),
+      h: Math.abs(stroke.y2 - stroke.y1)
+    };
+  }
+  if (stroke.type === 'pen' && stroke.points?.length) {
+    let minX = stroke.points[0].x;
+    let minY = stroke.points[0].y;
+    let maxX = minX;
+    let maxY = minY;
+    for (const pt of stroke.points) {
+      minX = Math.min(minX, pt.x);
+      minY = Math.min(minY, pt.y);
+      maxX = Math.max(maxX, pt.x);
+      maxY = Math.max(maxY, pt.y);
+    }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+  return null;
+}
+
+function drawStrokeSelection(ctx, stroke, color) {
+  const bounds = getStrokeBounds(stroke);
+  if (!bounds) return;
+  const pad = stroke.type === 'text' ? 4 : 6;
   ctx.save();
   ctx.strokeStyle = color;
   ctx.globalAlpha = 0.65;
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 3]);
-  ctx.strokeRect(stroke.x - pad, stroke.y - size - pad, w + pad * 2, size + pad * 2);
+  ctx.strokeRect(
+    bounds.x - pad,
+    bounds.y - pad,
+    Math.max(bounds.w, 1) + pad * 2,
+    Math.max(bounds.h, 1) + pad * 2
+  );
   ctx.restore();
 }
 
-function adjustTextSize(idx, delta) {
-  if (idx < 0) return;
-  const s = annotationStrokes[idx];
-  if (s?.type !== 'text') return;
-  const cur = s.size || 16;
-  const next = Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, cur + delta));
-  if (next === cur) return;
-  s.size = next;
-  annotationDirty = true;
-  redrawAnnotations();
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
-function hitTestTextStroke(p) {
+function hitTestPenStroke(stroke, p) {
+  if (!stroke.points || stroke.points.length < 2) return false;
+  const threshold = (stroke.width || 3) / 2 + 8;
+  for (let i = 1; i < stroke.points.length; i++) {
+    const a = stroke.points[i - 1];
+    const b = stroke.points[i];
+    if (distToSegment(p.x, p.y, a.x, a.y, b.x, b.y) <= threshold) return true;
+  }
+  return false;
+}
+
+function hitTestArrowStroke(stroke, p) {
+  const threshold = (stroke.width || 3) / 2 + 8;
+  return distToSegment(p.x, p.y, stroke.x1, stroke.y1, stroke.x2, stroke.y2) <= threshold;
+}
+
+function hitTestTextStroke(stroke, p) {
+  if (stroke.type !== 'text' || !stroke.text) return false;
+  const size = stroke.size || 16;
   const ctx = viewerCanvas.getContext('2d');
-  if (!ctx) return -1;
+  ctx.font = `600 ${size}px system-ui, sans-serif`;
+  const w = ctx.measureText(stroke.text).width;
+  const pad = 6;
+  return p.x >= stroke.x - pad && p.x <= stroke.x + w + pad &&
+    p.y >= stroke.y - size - pad && p.y <= stroke.y + pad;
+}
+
+function hitTestStroke(p) {
   for (let i = annotationStrokes.length - 1; i >= 0; i--) {
     const s = annotationStrokes[i];
-    if (s.type !== 'text' || !s.text) continue;
-    const size = s.size || 16;
-    ctx.font = `600 ${size}px system-ui, sans-serif`;
-    const w = ctx.measureText(s.text).width;
-    const pad = 6;
-    if (p.x >= s.x - pad && p.x <= s.x + w + pad && p.y >= s.y - size - pad && p.y <= s.y + pad) {
-      return i;
-    }
+    if (s.type === 'text' && hitTestTextStroke(s, p)) return i;
+    if (s.type === 'pen' && hitTestPenStroke(s, p)) return i;
+    if (s.type === 'arrow' && hitTestArrowStroke(s, p)) return i;
   }
   return -1;
 }
 
+function cloneStroke(stroke) {
+  if (stroke.type === 'pen') {
+    return { ...stroke, points: stroke.points.map(pt => ({ ...pt })) };
+  }
+  return { ...stroke };
+}
+
+function applyStrokeMove(stroke, snapshot, dx, dy) {
+  if (snapshot.type === 'text') {
+    stroke.x = snapshot.x + dx;
+    stroke.y = snapshot.y + dy;
+  } else if (snapshot.type === 'pen') {
+    stroke.points = snapshot.points.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+  } else if (snapshot.type === 'arrow') {
+    stroke.x1 = snapshot.x1 + dx;
+    stroke.y1 = snapshot.y1 + dy;
+    stroke.x2 = snapshot.x2 + dx;
+    stroke.y2 = snapshot.y2 + dy;
+  }
+}
+
+function adjustStrokeSize(idx, delta) {
+  if (idx < 0) return;
+  const s = annotationStrokes[idx];
+  if (!s) return;
+
+  if (s.type === 'text') {
+    const cur = s.size || 16;
+    const next = Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, cur + delta));
+    if (next === cur) return;
+    s.size = next;
+  } else if (s.type === 'pen' || s.type === 'arrow') {
+    const cur = s.width || 3;
+    const next = Math.min(STROKE_WIDTH_MAX, Math.max(STROKE_WIDTH_MIN, cur + delta));
+    if (next === cur) return;
+    s.width = next;
+  } else {
+    return;
+  }
+
+  annotationDirty = true;
+  redrawAnnotations();
+}
+
 function setAnnotationTool(tool) {
   annotationTool = tool;
-  movingTextIdx = -1;
-  if (tool !== 'move') selectedTextIdx = -1;
+  movingStrokeIdx = -1;
+  moveStartPoint = null;
+  moveSnapshot = null;
+  if (tool !== 'move') selectedStrokeIdx = -1;
   [annotatePen, annotateArrow, annotateText, annotateMove].forEach(btn => btn.classList.remove('active'));
   if (tool === 'pen') annotatePen.classList.add('active');
   if (tool === 'arrow') annotateArrow.classList.add('active');
@@ -297,8 +402,10 @@ async function loadShot(shot) {
   annotationStrokes = parsed.strokes;
   annotationDraft = null;
   annotationDirty = false;
-  movingTextIdx = -1;
-  selectedTextIdx = -1;
+  movingStrokeIdx = -1;
+  selectedStrokeIdx = -1;
+  moveStartPoint = null;
+  moveSnapshot = null;
   setAnnotationTool('pen');
 
   viewerImg.onerror = () => {
@@ -445,13 +552,15 @@ document.addEventListener('keydown', e => {
     closeViewer();
     return;
   }
-  if (annotationTool === 'move' && selectedTextIdx >= 0) {
+  if (annotationTool === 'move' && selectedStrokeIdx >= 0) {
+    const s = annotationStrokes[selectedStrokeIdx];
+    const step = s?.type === 'text' ? TEXT_SIZE_STEP : STROKE_WIDTH_STEP;
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      adjustTextSize(selectedTextIdx, TEXT_SIZE_STEP);
+      adjustStrokeSize(selectedStrokeIdx, step);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      adjustTextSize(selectedTextIdx, -TEXT_SIZE_STEP);
+      adjustStrokeSize(selectedStrokeIdx, -step);
     }
   }
 });
@@ -461,16 +570,16 @@ viewerCanvas.addEventListener('pointerdown', e => {
   viewerCanvas.setPointerCapture(e.pointerId);
   const p = canvasPoint(e);
   if (annotationTool === 'move') {
-    const idx = hitTestTextStroke(p);
+    const idx = hitTestStroke(p);
     if (idx >= 0) {
-      selectedTextIdx = idx;
-      movingTextIdx = idx;
-      const s = annotationStrokes[idx];
-      moveDragOffset = { x: p.x - s.x, y: p.y - s.y };
+      selectedStrokeIdx = idx;
+      movingStrokeIdx = idx;
+      moveStartPoint = p;
+      moveSnapshot = cloneStroke(annotationStrokes[idx]);
       viewerCanvas.classList.add('dragging');
       redrawAnnotations();
     } else {
-      selectedTextIdx = -1;
+      selectedStrokeIdx = -1;
       redrawAnnotations();
     }
     return;
@@ -491,10 +600,10 @@ viewerCanvas.addEventListener('pointerdown', e => {
 
 viewerCanvas.addEventListener('pointermove', e => {
   const p = canvasPoint(e);
-  if (movingTextIdx >= 0) {
-    const s = annotationStrokes[movingTextIdx];
-    s.x = p.x - moveDragOffset.x;
-    s.y = p.y - moveDragOffset.y;
+  if (movingStrokeIdx >= 0 && moveStartPoint && moveSnapshot) {
+    const dx = p.x - moveStartPoint.x;
+    const dy = p.y - moveStartPoint.y;
+    applyStrokeMove(annotationStrokes[movingStrokeIdx], moveSnapshot, dx, dy);
     annotationDirty = true;
     redrawAnnotations();
     return;
@@ -513,18 +622,22 @@ viewerCanvas.addEventListener('pointermove', e => {
 viewerCanvas.addEventListener('wheel', e => {
   if (!currentShot || annotationTool !== 'move') return;
   const p = canvasPoint(e);
-  const hit = hitTestTextStroke(p);
-  const idx = hit >= 0 ? hit : selectedTextIdx;
+  const hit = hitTestStroke(p);
+  const idx = hit >= 0 ? hit : selectedStrokeIdx;
   if (idx < 0) return;
   e.preventDefault();
-  if (hit >= 0) selectedTextIdx = hit;
-  const delta = e.deltaY < 0 ? TEXT_SIZE_STEP : -TEXT_SIZE_STEP;
-  adjustTextSize(idx, delta);
+  if (hit >= 0) selectedStrokeIdx = hit;
+  const s = annotationStrokes[idx];
+  const step = s?.type === 'text' ? TEXT_SIZE_STEP : STROKE_WIDTH_STEP;
+  const delta = e.deltaY < 0 ? step : -step;
+  adjustStrokeSize(idx, delta);
 }, { passive: false });
 
 viewerCanvas.addEventListener('pointerup', () => {
-  if (movingTextIdx >= 0) {
-    movingTextIdx = -1;
+  if (movingStrokeIdx >= 0) {
+    movingStrokeIdx = -1;
+    moveStartPoint = null;
+    moveSnapshot = null;
     viewerCanvas.classList.remove('dragging');
     return;
   }
