@@ -647,20 +647,11 @@ async function flushAutoSync(showFeedback = false) {
 async function autoSaveAndCopy(showFeedback = false) {
   if (!currentShot) return;
 
-  const payload = JSON.stringify({
-    version: 1,
-    displayW: viewerCanvas.width,
-    displayH: viewerCanvas.height,
-    strokes: annotationStrokes
-  });
-  const shotForRender = { ...currentShot, annotations: payload };
+  const parsed = getLiveAnnotationPayload();
+  const shotForRender = { ...currentShot, annotations: JSON.stringify(parsed) };
 
-  await send('UPDATE_SCREENSHOT', { id: currentShot.id, patch: { annotations: payload } });
-  currentShot = { ...currentShot, annotations: payload };
-  annotationDirty = false;
-
-  const dataUrl = annotationStrokes.length
-    ? await flattenAnnotatedImage(shotForRender, parseAnnotations(shotForRender))
+  const dataUrl = parsed.strokes.length
+    ? await flattenAnnotatedImage(shotForRender, parsed)
     : currentShot.dataUrl;
 
   try {
@@ -668,10 +659,27 @@ async function autoSaveAndCopy(showFeedback = false) {
     const res = await fetch(dataUrl);
     const blob = await res.blob();
     await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-    if (showFeedback) showToast('Saved & copied — ready to paste');
+    if (showFeedback) showToast('Copied — ready to paste');
   } catch {
-    if (showFeedback) showToast('Saved — clipboard copy failed');
+    if (showFeedback) showToast('Clipboard copy failed');
   }
+
+  // Keep the source snap clean — the annotated copy is saved separately via clipboard capture.
+  if (currentShot.annotations != null) {
+    await send('UPDATE_SCREENSHOT', { id: currentShot.id, patch: { annotations: null } });
+    currentShot = { ...currentShot, annotations: null };
+  }
+
+  annotationDirty = false;
+}
+
+function getLiveAnnotationPayload() {
+  return {
+    version: 1,
+    displayW: viewerCanvas.width,
+    displayH: viewerCanvas.height,
+    strokes: annotationStrokes
+  };
 }
 
 function isSelectionTool() {
@@ -729,8 +737,7 @@ async function loadShot(shot) {
   viewerWorkspace.hidden = false;
   viewerTime.textContent = formatTime(shot.savedAt);
 
-  const parsed = parseAnnotations(shot);
-  annotationStrokes = parsed.strokes;
+  annotationStrokes = [];
   annotationDraft = null;
   annotationDirty = false;
   clearTimeout(autoSyncTimer);
@@ -744,6 +751,12 @@ async function loadShot(shot) {
   setAnnotationTool('pen');
   annotationColor = getDefaultAnnotationColor();
   updateColorPickerUI();
+
+  // One-time cleanup: older builds saved annotation JSON on the source snap.
+  if (shot.annotations) {
+    send('UPDATE_SCREENSHOT', { id: shot.id, patch: { annotations: null } }).catch(() => {});
+    currentShot = { ...shot, annotations: null };
+  }
 
   viewerImg.onerror = () => {
     showToast('Could not load screenshot');
@@ -813,6 +826,9 @@ async function flattenAnnotatedImage(shot, parsed) {
 }
 
 async function getShotDataUrl(shot) {
+  if (shot?.id === currentShot?.id && annotationStrokes.length) {
+    return flattenAnnotatedImage(shot, getLiveAnnotationPayload());
+  }
   const parsed = parseAnnotations(shot);
   if (!parsed.strokes.length) return shot.dataUrl;
   return flattenAnnotatedImage(shot, parsed);
@@ -1068,10 +1084,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     return;
   }
   if (currentShot && shot.annotations !== currentShot.annotations && !annotationDirty) {
-    const parsed = parseAnnotations(shot);
-    annotationStrokes = parsed.strokes;
     currentShot = shot;
-    redrawAnnotations();
   }
 });
 

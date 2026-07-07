@@ -1492,9 +1492,8 @@ async function saveAnnotations() {
 }
 
 async function getShotDataUrl(shot) {
-  const parsed = parseAnnotations(shot);
-  if (!parsed.strokes.length) return shot.dataUrl;
-  return flattenAnnotatedImage(shot, parsed);
+  // Snaps store the final image in dataUrl; annotation JSON is not kept on source snaps.
+  return shot.dataUrl;
 }
 
 async function flattenAnnotatedImage(shot, parsed) {
