@@ -29,6 +29,10 @@ const TEXT_SIZE_STEP = 2;
 const STROKE_WIDTH_MIN = 1;
 const STROKE_WIDTH_MAX = 24;
 const STROKE_WIDTH_STEP = 1;
+const SQUARE_SIZE_MIN = 8;
+const SQUARE_SIZE_STEP = 4;
+const HANDLE_DRAW_RADIUS = 5;
+const HANDLE_HIT_RADIUS = 10;
 
 const shotId = new URLSearchParams(location.search).get('id');
 
@@ -42,6 +46,9 @@ let movingStrokeIdx = -1;
 let selectedStrokeIdx = -1;
 let moveStartPoint = null;
 let moveSnapshot = null;
+let resizingStrokeIdx = -1;
+let resizeHandle = null;
+let resizeSnapshot = null;
 let toastTimer = null;
 let imageObjectUrl = null;
 let autoSyncTimer = null;
@@ -245,6 +252,9 @@ function redrawAnnotations() {
     drawStroke(ctx, annotationStrokes[i], color);
     if (isSelectionTool() && i === selectedStrokeIdx) {
       drawStrokeSelection(ctx, annotationStrokes[i], color);
+      if (annotationStrokes[i].type === 'square') {
+        drawSquareHandles(ctx, annotationStrokes[i], color);
+      }
     }
   }
 
@@ -361,6 +371,141 @@ function drawStrokeSelection(ctx, stroke, color) {
     Math.max(bounds.h, 1) + pad * 2
   );
   ctx.restore();
+}
+
+function getSquareNormalized(stroke) {
+  return {
+    left: Math.min(stroke.x1, stroke.x2),
+    top: Math.min(stroke.y1, stroke.y2),
+    right: Math.max(stroke.x1, stroke.x2),
+    bottom: Math.max(stroke.y1, stroke.y2)
+  };
+}
+
+function applySquareBounds(stroke, bounds) {
+  stroke.x1 = bounds.left;
+  stroke.y1 = bounds.top;
+  stroke.x2 = bounds.right;
+  stroke.y2 = bounds.bottom;
+}
+
+function getSquareHandles(stroke) {
+  const b = getSquareNormalized(stroke);
+  const cx = (b.left + b.right) / 2;
+  const cy = (b.top + b.bottom) / 2;
+  return {
+    nw: { x: b.left, y: b.top },
+    n: { x: cx, y: b.top },
+    ne: { x: b.right, y: b.top },
+    e: { x: b.right, y: cy },
+    se: { x: b.right, y: b.bottom },
+    s: { x: cx, y: b.bottom },
+    sw: { x: b.left, y: b.bottom },
+    w: { x: b.left, y: cy }
+  };
+}
+
+const HANDLE_CURSORS = {
+  nw: 'nwse-resize',
+  se: 'nwse-resize',
+  ne: 'nesw-resize',
+  sw: 'nesw-resize',
+  n: 'ns-resize',
+  s: 'ns-resize',
+  e: 'ew-resize',
+  w: 'ew-resize'
+};
+
+function hitTestSquareHandle(stroke, p) {
+  const handles = getSquareHandles(stroke);
+  for (const [id, pt] of Object.entries(handles)) {
+    if (Math.hypot(p.x - pt.x, p.y - pt.y) <= HANDLE_HIT_RADIUS) return id;
+  }
+  return null;
+}
+
+function findSquareHandleAtPoint(p) {
+  for (let i = annotationStrokes.length - 1; i >= 0; i--) {
+    const s = annotationStrokes[i];
+    if (s.type !== 'square') continue;
+    const handle = hitTestSquareHandle(s, p);
+    if (handle) return { idx: i, handle };
+  }
+  return null;
+}
+
+function drawSquareHandles(ctx, stroke, color) {
+  const handles = getSquareHandles(stroke);
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  for (const pt of Object.values(handles)) {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, HANDLE_DRAW_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function clampSquareBounds(bounds, handle) {
+  const b = { ...bounds };
+  if (b.right - b.left < SQUARE_SIZE_MIN) {
+    if (handle?.includes('w')) b.left = b.right - SQUARE_SIZE_MIN;
+    else b.right = b.left + SQUARE_SIZE_MIN;
+  }
+  if (b.bottom - b.top < SQUARE_SIZE_MIN) {
+    if (handle?.includes('n')) b.top = b.bottom - SQUARE_SIZE_MIN;
+    else b.bottom = b.top + SQUARE_SIZE_MIN;
+  }
+  return b;
+}
+
+function applySquareResize(stroke, snap, handle, p) {
+  let { left, top, right, bottom } = snap;
+  switch (handle) {
+    case 'nw': left = p.x; top = p.y; break;
+    case 'n': top = p.y; break;
+    case 'ne': right = p.x; top = p.y; break;
+    case 'e': right = p.x; break;
+    case 'se': right = p.x; bottom = p.y; break;
+    case 's': bottom = p.y; break;
+    case 'sw': left = p.x; bottom = p.y; break;
+    case 'w': left = p.x; break;
+    default: return;
+  }
+  applySquareBounds(stroke, clampSquareBounds({ left, top, right, bottom }, handle));
+}
+
+function adjustSquareBounds(idx, key) {
+  if (idx < 0) return;
+  const s = annotationStrokes[idx];
+  if (s?.type !== 'square') return;
+  const b = getSquareNormalized(s);
+  const step = SQUARE_SIZE_STEP;
+  switch (key) {
+    case 'ArrowRight': b.right += step; break;
+    case 'ArrowLeft': b.left -= step; break;
+    case 'ArrowDown': b.bottom += step; break;
+    case 'ArrowUp': b.top -= step; break;
+    default: return;
+  }
+  if (b.right - b.left < SQUARE_SIZE_MIN || b.bottom - b.top < SQUARE_SIZE_MIN) return;
+  applySquareBounds(s, b);
+  annotationDirty = true;
+  redrawAnnotations();
+  scheduleAutoSync();
+}
+
+function updateSquareCursor(p) {
+  if (!isSelectionTool() || resizingStrokeIdx >= 0) return;
+  const hit = findSquareHandleAtPoint(p);
+  if (hit) {
+    viewerCanvas.style.cursor = HANDLE_CURSORS[hit.handle] || 'pointer';
+    return;
+  }
+  viewerCanvas.style.cursor = '';
 }
 
 function distToSegment(px, py, x1, y1, x2, y2) {
@@ -548,6 +693,9 @@ function deleteSelectedStroke() {
   movingStrokeIdx = -1;
   moveStartPoint = null;
   moveSnapshot = null;
+  resizingStrokeIdx = -1;
+  resizeHandle = null;
+  resizeSnapshot = null;
   markAnnotationsChanged();
   redrawAnnotations();
   updateDeleteBtn();
@@ -558,6 +706,9 @@ function setAnnotationTool(tool) {
   movingStrokeIdx = -1;
   moveStartPoint = null;
   moveSnapshot = null;
+  resizingStrokeIdx = -1;
+  resizeHandle = null;
+  resizeSnapshot = null;
   if (tool !== 'select' && tool !== 'move') selectedStrokeIdx = -1;
   [annotatePen, annotateArrow, annotateSquare, annotateText, annotateSelect, annotateMove].forEach(btn => btn.classList.remove('active'));
   if (tool === 'pen') annotatePen.classList.add('active');
@@ -587,6 +738,9 @@ async function loadShot(shot) {
   selectedStrokeIdx = -1;
   moveStartPoint = null;
   moveSnapshot = null;
+  resizingStrokeIdx = -1;
+  resizeHandle = null;
+  resizeSnapshot = null;
   setAnnotationTool('pen');
   annotationColor = getDefaultAnnotationColor();
   updateColorPickerUI();
@@ -746,6 +900,11 @@ document.addEventListener('keydown', e => {
   }
   if (isSelectionTool() && selectedStrokeIdx >= 0) {
     const s = annotationStrokes[selectedStrokeIdx];
+    if (s?.type === 'square' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      e.preventDefault();
+      adjustSquareBounds(selectedStrokeIdx, e.key);
+      return;
+    }
     const step = s?.type === 'text' ? TEXT_SIZE_STEP : STROKE_WIDTH_STEP;
     if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -766,6 +925,19 @@ viewerCanvas.addEventListener('pointerdown', e => {
   viewerCanvas.setPointerCapture(e.pointerId);
   const p = canvasPoint(e);
   if (annotationTool === 'select') {
+    const handleHit = findSquareHandleAtPoint(p);
+    if (handleHit) {
+      selectedStrokeIdx = handleHit.idx;
+      syncColorPickerToSelection();
+      resizingStrokeIdx = handleHit.idx;
+      resizeHandle = handleHit.handle;
+      resizeSnapshot = getSquareNormalized(annotationStrokes[handleHit.idx]);
+      viewerCanvas.classList.add('dragging');
+      viewerCanvas.style.cursor = HANDLE_CURSORS[handleHit.handle] || 'pointer';
+      updateDeleteBtn();
+      redrawAnnotations();
+      return;
+    }
     const idx = hitTestStroke(p);
     selectedStrokeIdx = idx;
     syncColorPickerToSelection();
@@ -809,6 +981,12 @@ viewerCanvas.addEventListener('pointerdown', e => {
 
 viewerCanvas.addEventListener('pointermove', e => {
   const p = canvasPoint(e);
+  if (resizingStrokeIdx >= 0 && resizeHandle && resizeSnapshot) {
+    applySquareResize(annotationStrokes[resizingStrokeIdx], resizeSnapshot, resizeHandle, p);
+    annotationDirty = true;
+    redrawAnnotations();
+    return;
+  }
   if (movingStrokeIdx >= 0 && moveStartPoint && moveSnapshot) {
     const dx = p.x - moveStartPoint.x;
     const dy = p.y - moveStartPoint.y;
@@ -817,15 +995,18 @@ viewerCanvas.addEventListener('pointermove', e => {
     redrawAnnotations();
     return;
   }
-  if (!annotationDraft) return;
-  if (annotationDraft.type === 'pen') {
-    annotationDraft.points.push(p);
-    redrawAnnotations();
-  } else if (annotationDraft.type === 'arrow' || annotationDraft.type === 'square') {
-    annotationDraft.x2 = p.x;
-    annotationDraft.y2 = p.y;
-    redrawAnnotations();
+  if (annotationDraft) {
+    if (annotationDraft.type === 'pen') {
+      annotationDraft.points.push(p);
+      redrawAnnotations();
+    } else if (annotationDraft.type === 'arrow' || annotationDraft.type === 'square') {
+      annotationDraft.x2 = p.x;
+      annotationDraft.y2 = p.y;
+      redrawAnnotations();
+    }
+    return;
   }
+  if (isSelectionTool()) updateSquareCursor(p);
 });
 
 viewerCanvas.addEventListener('wheel', e => {
@@ -847,6 +1028,14 @@ viewerCanvas.addEventListener('wheel', e => {
 }, { passive: false });
 
 viewerCanvas.addEventListener('pointerup', () => {
+  if (resizingStrokeIdx >= 0) {
+    resizingStrokeIdx = -1;
+    resizeHandle = null;
+    resizeSnapshot = null;
+    viewerCanvas.classList.remove('dragging');
+    if (annotationDirty) scheduleAutoSync();
+    return;
+  }
   if (movingStrokeIdx >= 0) {
     movingStrokeIdx = -1;
     moveStartPoint = null;
