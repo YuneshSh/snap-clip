@@ -250,6 +250,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CLEAR_BOOKMARKS':
       clearBookmarks().then(sendResponse);
       return true;
+    case 'GET_QUICK_NOTES':
+      getQuickNotes().then(sendResponse);
+      return true;
+    case 'SAVE_QUICK_NOTE':
+      saveQuickNote(message.title, message.text).then(sendResponse);
+      return true;
+    case 'UPDATE_QUICK_NOTE':
+      updateQuickNote(message.id, message.patch).then(sendResponse);
+      return true;
+    case 'DELETE_QUICK_NOTE':
+      deleteQuickNote(message.id).then(sendResponse);
+      return true;
+    case 'DELETE_QUICK_NOTES':
+      deleteQuickNotes(message.ids).then(sendResponse);
+      return true;
+    case 'RESTORE_QUICK_NOTES':
+      restoreQuickNotes(message.items).then(sendResponse);
+      return true;
+    case 'TOGGLE_QUICK_NOTE_PIN':
+      toggleQuickNotePin(message.id).then(sendResponse);
+      return true;
+    case 'CLEAR_QUICK_NOTES':
+      clearQuickNotes().then(sendResponse);
+      return true;
     case 'GET_SETTINGS':
       getSettings().then(sendResponse);
       return true;
@@ -293,6 +317,11 @@ async function saveSettings(settings) {
   const trimmedBookmarks = trimPinAware(bookmarks, settings.maxScreenshots);
   if (trimmedBookmarks.length !== bookmarks.length) {
     await chrome.storage.local.set({ bookmarks: trimmedBookmarks });
+  }
+  const quickNotes = await getQuickNotes();
+  const trimmedQuickNotes = trimPinAware(quickNotes, settings.maxScreenshots);
+  if (trimmedQuickNotes.length !== quickNotes.length) {
+    await chrome.storage.local.set({ quickNotes: trimmedQuickNotes });
   }
   return { success: true };
 }
@@ -620,6 +649,103 @@ async function toggleBookmarkPin(id) {
 async function clearBookmarks() {
   const bookmarks = await getBookmarks();
   await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.pinned) });
+  return { success: true };
+}
+
+// ── Quick notes (user-authored snippets) ─────────────────────────────────────
+async function getQuickNotes() {
+  const result = await chrome.storage.local.get('quickNotes');
+  return result.quickNotes || [];
+}
+
+let quickNoteSaveQueue = Promise.resolve();
+
+function saveQuickNote(title, text) {
+  const run = quickNoteSaveQueue.then(() => doSaveQuickNote(title, text));
+  quickNoteSaveQueue = run.catch(() => {});
+  return run;
+}
+
+async function doSaveQuickNote(title, text) {
+  const body = (text || '').trim();
+  if (!body) return { success: false, reason: 'empty' };
+
+  const settings = await getSettings();
+  const quickNotes = await getQuickNotes();
+  const entry = {
+    id: Date.now().toString() + Math.random().toString(36).slice(2),
+    title: (title || '').trim(),
+    text: body,
+    savedAt: Date.now(),
+    updatedAt: Date.now(),
+    pinned: false
+  };
+
+  quickNotes.unshift(entry);
+  await chrome.storage.local.set({ quickNotes: trimPinAware(quickNotes, settings.maxScreenshots) });
+  return { success: true, id: entry.id, entry };
+}
+
+async function updateQuickNote(id, patch) {
+  const quickNotes = await getQuickNotes();
+  const idx = quickNotes.findIndex(n => n.id === id);
+  if (idx === -1) return { success: false, reason: 'not_found' };
+
+  const nextText = patch.text != null ? String(patch.text).trim() : quickNotes[idx].text;
+  if (!nextText) return { success: false, reason: 'empty' };
+
+  quickNotes[idx] = {
+    ...quickNotes[idx],
+    ...patch,
+    title: patch.title != null ? String(patch.title).trim() : quickNotes[idx].title,
+    text: nextText,
+    updatedAt: Date.now()
+  };
+  await chrome.storage.local.set({ quickNotes });
+  return { success: true, entry: quickNotes[idx] };
+}
+
+async function deleteQuickNote(id) {
+  const quickNotes = await getQuickNotes();
+  await chrome.storage.local.set({ quickNotes: quickNotes.filter(n => n.id !== id) });
+  return { success: true };
+}
+
+async function deleteQuickNotes(ids) {
+  const idSet = new Set(ids || []);
+  const quickNotes = await getQuickNotes();
+  const before = quickNotes.length;
+  const next = quickNotes.filter(n => !idSet.has(n.id));
+  await chrome.storage.local.set({ quickNotes: next });
+  return { success: true, deleted: before - next.length };
+}
+
+async function restoreQuickNotes(items) {
+  if (!items?.length) return { success: true, restored: 0 };
+  const settings = await getSettings();
+  const quickNotes = await getQuickNotes();
+  const existing = new Set(quickNotes.map(n => n.id));
+  const toAdd = items.filter(i => !existing.has(i.id));
+  const merged = [...toAdd, ...quickNotes];
+  await chrome.storage.local.set({ quickNotes: trimPinAware(merged, settings.maxScreenshots) });
+  return { success: true, restored: toAdd.length };
+}
+
+async function toggleQuickNotePin(id) {
+  const settings = await getSettings();
+  let quickNotes = await getQuickNotes();
+  const idx = quickNotes.findIndex(n => n.id === id);
+  if (idx === -1) return { success: false, reason: 'not_found' };
+  const pinned = !Boolean(quickNotes[idx].pinned);
+  quickNotes = quickNotes.map(n => n.id === id ? { ...n, pinned } : n);
+  quickNotes = trimPinAware(quickNotes, settings.maxScreenshots);
+  await chrome.storage.local.set({ quickNotes });
+  return { success: true, pinned };
+}
+
+async function clearQuickNotes() {
+  const quickNotes = await getQuickNotes();
+  await chrome.storage.local.set({ quickNotes: quickNotes.filter(n => n.pinned) });
   return { success: true };
 }
 

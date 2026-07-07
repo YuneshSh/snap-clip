@@ -25,11 +25,15 @@ const statusDot      = $('statusDot');
 const tabSnaps       = $('tabSnaps');
 const tabTexts       = $('tabTexts');
 const tabLinks       = $('tabLinks');
+const tabNotes       = $('tabNotes');
 const snapsPanel     = $('snapsPanel');
 const textsPanel     = $('textsPanel');
 const linksPanel     = $('linksPanel');
+const notesPanel     = $('notesPanel');
+const noteComposer   = $('noteComposer');
 const textList       = $('textList');
 const linkList       = $('linkList');
+const noteList       = $('noteList');
 const emptyStateTexts= $('emptyStateTexts');
 const emptyStateLinks= $('emptyStateLinks');
 const calChip        = $('calChip');
@@ -65,6 +69,17 @@ const linkBulkDeleteBtn = $('linkBulkDeleteBtn');
 const emptyStateLinksFiltered = $('emptyStateLinksFiltered');
 const snapSelectBtn  = $('snapSelectBtn');
 const snapBulkDeleteBtn = $('snapBulkDeleteBtn');
+const noteTitleInput = $('noteTitleInput');
+const noteBodyInput  = $('noteBodyInput');
+const noteSaveBtn    = $('noteSaveBtn');
+const noteCancelEditBtn = $('noteCancelEditBtn');
+const noteComposerLabel = $('noteComposerLabel');
+const noteSearchInput= $('noteSearchInput');
+const noteSortSelect = $('noteSortSelect');
+const noteSelectBtn  = $('noteSelectBtn');
+const noteBulkDeleteBtn = $('noteBulkDeleteBtn');
+const emptyStateNotes = $('emptyStateNotes');
+const emptyStateNotesFiltered = $('emptyStateNotesFiltered');
 const lightboxImgwrap = document.querySelector('.lightbox-imgwrap');
 const lightboxCanvas = $('lightboxCanvas');
 const lightboxCanvasStack = $('lightboxCanvasStack');
@@ -79,6 +94,7 @@ let screenshots   = [];
 let texts         = [];
 let bookmarks     = [];
 let notes         = [];
+let quickNotes    = [];
 let settings      = { maxScreenshots: 10, theme: 'ocean' };
 let activeTab     = 'snaps';
 let pinnedExpanded= false;
@@ -91,12 +107,17 @@ let textSearchQuery = '';
 let textSortOrder   = 'newest';
 let linkSearchQuery = '';
 let linkSortOrder   = 'newest';
+let noteSearchQuery = '';
+let noteSortOrder   = 'newest';
 let textSelectMode  = false;
 let linkSelectMode  = false;
 let snapSelectMode  = false;
+let noteSelectMode  = false;
+let editingNoteId   = null;
 let selectedTextIds = new Set();
 let selectedLinkIds = new Set();
 let selectedSnapIds = new Set();
+let selectedNoteIds = new Set();
 let undoPending     = null;
 let undoTimer       = null;
 
@@ -126,14 +147,16 @@ function lockPopupSize() {
 // ── Init ──────────────────────────────────────────────────────────────────
 lockPopupSize();
 (async () => {
-  [settings, screenshots, texts, bookmarks, notes] = await Promise.all([
+  [settings, screenshots, texts, bookmarks, notes, quickNotes] = await Promise.all([
     send('GET_SETTINGS'),
     send('GET_SCREENSHOTS'),
     send('GET_TEXTS'),
     send('GET_BOOKMARKS'),
-    send('GET_NOTES')
+    send('GET_NOTES'),
+    send('GET_QUICK_NOTES')
   ]);
   notes = notes || [];
+  quickNotes = (quickNotes || []).map(n => ({ pinned: false, title: '', ...n }));
   texts = (texts || []).map(t => ({ pinned: false, ...t }));
   bookmarks = (bookmarks || []).map(b => ({ pinned: false, ...b }));
   maxInput.value = settings.maxScreenshots;
@@ -141,6 +164,7 @@ lockPopupSize();
   renderGrid();
   renderTexts();
   renderLinks();
+  renderNotes();
   updateCountBadge();
   updatePinnedDrawer();
   initCalendar();
@@ -177,21 +201,26 @@ chrome.storage.onChanged.addListener((changes, area) => {
     bookmarks = (changes.bookmarks.newValue || []).map(b => ({ pinned: false, ...b }));
     renderLinks();
   }
+  if (changes.quickNotes) {
+    quickNotes = (changes.quickNotes.newValue || []).map(n => ({ pinned: false, title: '', ...n }));
+    renderNotes();
+  }
   if (changes.notes) {
     notes = changes.notes.newValue || [];
     renderCalendar();
     renderCalNotes();
     renderTicker();
   }
-  if (changes.texts || changes.bookmarks) updatePinnedDrawer();
-  if (changes.screenshots || changes.texts || changes.bookmarks) updateCountBadge();
+  if (changes.texts || changes.bookmarks || changes.quickNotes) updatePinnedDrawer();
+  if (changes.screenshots || changes.texts || changes.bookmarks || changes.quickNotes) updateCountBadge();
 });
 
 // ── Tabs ────────────────────────────────────────────────────────────────────
 const TABS = {
   snaps: { btn: tabSnaps, panel: snapsPanel },
   texts: { btn: tabTexts, panel: textsPanel },
-  links: { btn: tabLinks, panel: linksPanel }
+  links: { btn: tabLinks, panel: linksPanel },
+  notes: { btn: tabNotes, panel: notesPanel }
 };
 
 function switchTab(tab) {
@@ -200,6 +229,7 @@ function switchTab(tab) {
   exitSelectionMode('texts');
   exitSelectionMode('links');
   exitSelectionMode('snaps');
+  exitSelectionMode('notes');
   for (const [name, { btn, panel }] of Object.entries(TABS)) {
     const on = name === tab;
     btn.classList.toggle('active', on);
@@ -213,10 +243,12 @@ function switchTab(tab) {
 tabSnaps.addEventListener('click', () => switchTab('snaps'));
 tabTexts.addEventListener('click', () => switchTab('texts'));
 tabLinks.addEventListener('click', () => switchTab('links'));
+tabNotes.addEventListener('click', () => switchTab('notes'));
 
 function updateCountBadge() {
   const n = activeTab === 'snaps' ? screenshots.length
           : activeTab === 'texts' ? texts.length
+          : activeTab === 'notes' ? quickNotes.length
           : bookmarks.length;
   countBadge.textContent = `${n} / ${settings.maxScreenshots}`;
 }
@@ -476,11 +508,14 @@ function updatePinnedDrawer() {
   if (activeTab === 'snaps') { pinnedDrawer.hidden = true; return; }
 
   const isTexts = activeTab === 'texts';
-  const items = (isTexts ? texts : bookmarks).filter(i => !!i.pinned);
+  const isNotes = activeTab === 'notes';
+  const items = isTexts ? texts.filter(i => !!i.pinned)
+    : isNotes ? quickNotes.filter(i => !!i.pinned)
+    : bookmarks.filter(i => !!i.pinned);
 
   pinnedDrawer.hidden = false;
   pinnedDrawer.removeAttribute('hidden');
-  pinnedTitle.textContent = isTexts ? 'Pinned texts' : 'Pinned links';
+  pinnedTitle.textContent = isTexts ? 'Pinned texts' : isNotes ? 'Pinned notes' : 'Pinned links';
   pinnedCount.textContent = items.length;
   pinnedDrawer.classList.toggle('open', pinnedExpanded);
   pinnedToggle.setAttribute('aria-expanded', String(pinnedExpanded));
@@ -493,11 +528,17 @@ function updatePinnedDrawer() {
       empty.className = 'pinned-empty';
       empty.textContent = isTexts
         ? 'No pinned texts yet — tap the pin icon on any text.'
-        : 'No pinned links yet — tap the pin icon on any link.';
+        : isNotes
+          ? 'No pinned notes yet — tap the pin icon on any note.'
+          : 'No pinned links yet — tap the pin icon on any link.';
       pinnedList.appendChild(empty);
     } else {
       items.forEach(entry => {
-        pinnedList.appendChild(isTexts ? buildPinnedTextCard(entry) : buildBookmarkCard(entry, false));
+        pinnedList.appendChild(
+          isTexts ? buildPinnedTextCard(entry)
+            : isNotes ? buildPinnedNoteCard(entry)
+            : buildBookmarkCard(entry, false)
+        );
       });
     }
   }
@@ -615,6 +656,10 @@ clearAllBtn.addEventListener('click', async () => {
     if (!confirm('Delete all saved texts?')) return;
     await send('CLEAR_TEXTS');
     showToast('All texts cleared');
+  } else if (activeTab === 'notes') {
+    if (!confirm('Delete all unpinned notes? Pinned notes are kept.')) return;
+    await send('CLEAR_QUICK_NOTES');
+    showToast('Unpinned notes cleared');
   } else {
     if (!confirm('Delete all unpinned links? Pinned links are kept.')) return;
     await send('CLEAR_BOOKMARKS');
@@ -753,12 +798,25 @@ function filterBookmarks(items) {
   });
 }
 
+function filterNotes(items) {
+  const q = noteSearchQuery.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter(n => {
+    const hay = [n.title, n.text].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+}
+
 function getVisibleTexts() {
   return sortBySavedAt(filterTexts(texts.filter(t => !t.pinned)), textSortOrder);
 }
 
 function getVisibleBookmarks() {
   return sortBySavedAt(filterBookmarks(bookmarks.filter(b => !b.pinned)), linkSortOrder);
+}
+
+function getVisibleNotes() {
+  return sortBySavedAt(filterNotes(quickNotes.filter(n => !n.pinned)), noteSortOrder);
 }
 
 function updateBulkDeleteBtn(tab) {
@@ -774,6 +832,10 @@ function updateBulkDeleteBtn(tab) {
     const n = selectedSnapIds.size;
     snapBulkDeleteBtn.hidden = !snapSelectMode || n === 0;
     snapBulkDeleteBtn.textContent = n ? `Delete (${n})` : 'Delete';
+  } else if (tab === 'notes') {
+    const n = selectedNoteIds.size;
+    noteBulkDeleteBtn.hidden = !noteSelectMode || n === 0;
+    noteBulkDeleteBtn.textContent = n ? `Delete (${n})` : 'Delete';
   }
 }
 
@@ -793,10 +855,16 @@ function enterSelectionMode(tab) {
     snapSelectBtn.textContent = 'Cancel';
     snapSelectBtn.classList.add('active');
     grid.classList.add('selection-mode');
+  } else if (tab === 'notes') {
+    noteSelectMode = true;
+    noteSelectBtn.textContent = 'Cancel';
+    noteSelectBtn.classList.add('active');
+    noteList.classList.add('selection-mode');
   }
   updateBulkDeleteBtn(tab);
   if (tab === 'texts') renderTexts();
   else if (tab === 'links') renderLinks();
+  else if (tab === 'notes') renderNotes();
   else renderGrid();
 }
 
@@ -822,9 +890,17 @@ function exitSelectionMode(tab) {
     snapSelectBtn.classList.remove('active');
     grid.classList.remove('selection-mode');
     snapBulkDeleteBtn.hidden = true;
+  } else if (tab === 'notes') {
+    noteSelectMode = false;
+    selectedNoteIds.clear();
+    noteSelectBtn.textContent = 'Select';
+    noteSelectBtn.classList.remove('active');
+    noteList.classList.remove('selection-mode');
+    noteBulkDeleteBtn.hidden = true;
   }
   if (tab === 'texts') renderTexts();
   else if (tab === 'links') renderLinks();
+  else if (tab === 'notes') renderNotes();
   else renderGrid();
 }
 
@@ -838,6 +914,9 @@ function toggleSelectionMode(tab) {
   } else if (tab === 'snaps') {
     if (snapSelectMode) exitSelectionMode('snaps');
     else enterSelectionMode('snaps');
+  } else if (tab === 'notes') {
+    if (noteSelectMode) exitSelectionMode('notes');
+    else enterSelectionMode('notes');
   }
 }
 
@@ -845,6 +924,7 @@ function wireItemSelection(item, entry, tab) {
   const cb = item.querySelector('.item-select');
   const set = tab === 'texts' ? selectedTextIds
     : tab === 'links' ? selectedLinkIds
+    : tab === 'notes' ? selectedNoteIds
     : selectedSnapIds;
   cb.checked = set.has(entry.id);
   item.classList.toggle('selected', cb.checked);
@@ -886,6 +966,9 @@ async function performUndo() {
   } else if (type === 'screenshots') {
     await send('RESTORE_SCREENSHOTS', { items });
     showToast(items.length === 1 ? 'Screenshot restored' : `${items.length} screenshots restored`);
+  } else if (type === 'quickNotes') {
+    await send('RESTORE_QUICK_NOTES', { items });
+    showToast(items.length === 1 ? 'Note restored' : `${items.length} notes restored`);
   }
 }
 
@@ -924,6 +1007,19 @@ async function deleteBookmarksWithUndo(ids) {
   showToast(label, { undo: true });
   selectedLinkIds.clear();
   if (linkSelectMode) exitSelectionMode('links');
+}
+
+async function deleteQuickNotesWithUndo(ids) {
+  const idSet = new Set(ids);
+  const removed = quickNotes.filter(n => idSet.has(n.id));
+  if (!removed.length) return;
+  if (editingNoteId && idSet.has(editingNoteId)) resetNoteComposer();
+  await send('DELETE_QUICK_NOTES', { ids: [...idSet] });
+  scheduleUndo({ type: 'quickNotes', items: removed });
+  const label = removed.length === 1 ? 'Note deleted' : `${removed.length} notes deleted`;
+  showToast(label, { undo: true });
+  selectedNoteIds.clear();
+  if (noteSelectMode) exitSelectionMode('notes');
 }
 
 function linkHostname(url) {
@@ -998,6 +1094,28 @@ snapBulkDeleteBtn.addEventListener('click', async () => {
   if (!selectedSnapIds.size) return;
   if (!confirm(`Delete ${selectedSnapIds.size} selected screenshot(s)?`)) return;
   await deleteScreenshotsWithUndo([...selectedSnapIds]);
+});
+noteSearchInput.addEventListener('input', () => {
+  noteSearchQuery = noteSearchInput.value;
+  renderNotes();
+});
+noteSortSelect.addEventListener('change', () => {
+  noteSortOrder = noteSortSelect.value;
+  renderNotes();
+});
+noteSelectBtn.addEventListener('click', () => toggleSelectionMode('notes'));
+noteBulkDeleteBtn.addEventListener('click', async () => {
+  if (!selectedNoteIds.size) return;
+  if (!confirm(`Delete ${selectedNoteIds.size} selected note(s)?`)) return;
+  await deleteQuickNotesWithUndo([...selectedNoteIds]);
+});
+noteSaveBtn.addEventListener('click', () => saveQuickNoteFromComposer());
+noteCancelEditBtn.addEventListener('click', () => resetNoteComposer());
+noteBodyInput?.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault();
+    saveQuickNoteFromComposer();
+  }
 });
 toastAction.addEventListener('click', e => {
   e.stopPropagation();
@@ -1077,6 +1195,167 @@ function buildPinnedTextCard(entry) {
   });
 
   return item;
+}
+
+// ── Render (Quick notes) ──────────────────────────────────────────────────────
+function noteCopyText(entry) {
+  const title = (entry.title || '').trim();
+  const body = (entry.text || '').trim();
+  return title ? `${title}\n${body}` : body;
+}
+
+function resetNoteComposer() {
+  editingNoteId = null;
+  noteTitleInput.value = '';
+  noteBodyInput.value = '';
+  noteSaveBtn.textContent = 'Add note';
+  noteComposerLabel.textContent = 'New quick note';
+  noteCancelEditBtn.hidden = true;
+}
+
+function startEditNote(entry) {
+  editingNoteId = entry.id;
+  noteTitleInput.value = entry.title || '';
+  noteBodyInput.value = entry.text || '';
+  noteSaveBtn.textContent = 'Save changes';
+  noteComposerLabel.textContent = 'Edit note';
+  noteCancelEditBtn.hidden = false;
+  noteTitleInput.focus();
+  noteComposer?.scrollIntoView({ block: 'nearest' });
+}
+
+async function saveQuickNoteFromComposer() {
+  const title = noteTitleInput.value;
+  const text = noteBodyInput.value;
+  if (!text.trim()) {
+    showToast('Write something first');
+    noteBodyInput.focus();
+    return;
+  }
+
+  try {
+    if (editingNoteId) {
+      const res = await send('UPDATE_QUICK_NOTE', {
+        id: editingNoteId,
+        patch: { title, text }
+      });
+      if (!res?.success) {
+        showToast('Could not save note');
+        return;
+      }
+      showToast('Note updated');
+    } else {
+      const res = await send('SAVE_QUICK_NOTE', { title, text });
+      if (!res?.success) {
+        showToast('Could not save note');
+        return;
+      }
+      showToast('Note saved');
+    }
+    resetNoteComposer();
+  } catch {
+    showToast('Could not save note');
+  }
+}
+
+function renderNotes() {
+  const known = new Set([...noteList.children].map(c => c.dataset.id));
+  noteList.innerHTML = '';
+
+  const visible = getVisibleNotes();
+  const hasAny = quickNotes.length > 0;
+  const q = noteSearchQuery.trim();
+  const showNoMatch = q.length > 0 && visible.length === 0;
+
+  emptyStateNotes.style.display = (!hasAny && !q) ? '' : 'none';
+  emptyStateNotesFiltered.classList.toggle('show', showNoMatch);
+  noteList.style.display = visible.length ? '' : 'none';
+
+  visible.forEach(entry => {
+    noteList.appendChild(buildNoteCard(entry, !known.has(entry.id)));
+  });
+}
+
+function buildNoteCard(entry, isNew) {
+  const template = document.getElementById('noteCardTemplate');
+  const node = template.content.cloneNode(true);
+  const item = node.querySelector('.note-item');
+
+  item.dataset.id = entry.id;
+  if (isNew) item.classList.add('entering');
+  item.classList.toggle('pinned', !!entry.pinned);
+
+  const labelEl = item.querySelector('.note-label');
+  labelEl.textContent = entry.title || '';
+  item.querySelector('.note-content').textContent = entry.text;
+  item.querySelector('.text-time').textContent = formatTime(entry.updatedAt || entry.savedAt);
+
+  const pinBtn = item.querySelector('.note-pin-btn');
+  pinBtn.title = entry.pinned ? 'Unpin' : 'Pin';
+  pinBtn.classList.toggle('active', !!entry.pinned);
+
+  item.querySelector('.note-body').addEventListener('click', () => {
+    if (noteSelectMode) return;
+    copyQuickNote(entry);
+  });
+  item.querySelector('.note-edit-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    if (noteSelectMode) return;
+    startEditNote(entry);
+  });
+  pinBtn.addEventListener('click', e => { e.stopPropagation(); toggleQuickNotePin(entry.id); });
+  item.querySelector('.note-delete-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    deleteQuickNote(entry.id);
+  });
+
+  if (noteSelectMode) wireItemSelection(item, entry, 'notes');
+
+  return item;
+}
+
+function buildPinnedNoteCard(entry) {
+  const template = document.getElementById('pinnedNoteTemplate');
+  const node = template.content.cloneNode(true);
+  const item = node.querySelector('.pinned-note-item');
+
+  item.dataset.id = entry.id;
+  const labelEl = item.querySelector('.pinned-note-label');
+  labelEl.textContent = entry.title || '';
+  item.querySelector('.pinned-note-content').textContent = entry.text;
+
+  item.querySelector('.pinned-note-copy').addEventListener('click', () => copyQuickNote(entry));
+  item.querySelector('.pinned-mini-copy').addEventListener('click', e => {
+    e.stopPropagation();
+    copyQuickNote(entry);
+  });
+  item.querySelector('.note-pin-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    toggleQuickNotePin(entry.id);
+  });
+  item.querySelector('.note-delete-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    deleteQuickNote(entry.id);
+  });
+
+  return item;
+}
+
+async function copyQuickNote(entry) {
+  try {
+    await navigator.clipboard.writeText(noteCopyText(entry));
+    showToast('Note copied');
+  } catch {
+    showToast('Copy failed — check clipboard permission');
+  }
+}
+
+async function deleteQuickNote(id) {
+  await deleteQuickNotesWithUndo([id]);
+}
+
+async function toggleQuickNotePin(id) {
+  await send('TOGGLE_QUICK_NOTE_PIN', { id });
 }
 
 // ── Render (Links / Bookmarks) ────────────────────────────────────────────────
