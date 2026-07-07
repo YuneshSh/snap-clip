@@ -154,6 +154,54 @@ body {
   cursor: not-allowed;
 }
 
+.annotate-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border-strong);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.annotate-colors {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.annotate-color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: var(--c, var(--accent-400));
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+}
+.annotate-color:hover { transform: scale(1.08); }
+.annotate-color.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.annotate-color-custom {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(#f87171, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6, #f87171);
+}
+.annotate-color-custom input[type="color"] {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+}
+
 .viewer-workspace {
   flex: 1;
   min-height: 0;

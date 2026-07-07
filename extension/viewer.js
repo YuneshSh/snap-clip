@@ -19,6 +19,8 @@ const annotateMove = $('annotateMove');
 const annotateDelete = $('annotateDelete');
 const annotateUndo = $('annotateUndo');
 const annotateSave = $('annotateSave');
+const annotateColors = $('annotateColors');
+const annotateColorCustom = $('annotateColorCustom');
 
 const THEMES = ['ocean', 'violet', 'fuchsia', 'mint', 'sunset', 'coral', 'indigo', 'aurora'];
 const TEXT_SIZE_MIN = 10;
@@ -32,6 +34,7 @@ const shotId = new URLSearchParams(location.search).get('id');
 
 let currentShot = null;
 let annotationTool = 'pen';
+let annotationColor = '#38bdf8';
 let annotationStrokes = [];
 let annotationDraft = null;
 let annotationDirty = false;
@@ -46,6 +49,56 @@ let autoSyncInFlight = false;
 let autoSyncQueued = false;
 
 const AUTO_SYNC_MS = 400;
+
+function getDefaultAnnotationColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--accent-400').trim() || '#38bdf8';
+}
+
+function normalizeHexColor(color) {
+  if (!color) return getDefaultAnnotationColor();
+  const hex = color.trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(hex)) return hex;
+  if (/^#[0-9a-f]{3}$/.test(hex)) {
+    return `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+  }
+  return getDefaultAnnotationColor();
+}
+
+function colorsMatch(a, b) {
+  return normalizeHexColor(a) === normalizeHexColor(b);
+}
+
+function updateColorPickerUI() {
+  const current = normalizeHexColor(annotationColor);
+  let hasPreset = false;
+  annotateColors?.querySelectorAll('.annotate-color[data-color]').forEach(btn => {
+    const match = colorsMatch(btn.dataset.color, current);
+    btn.classList.toggle('active', match);
+    if (match) hasPreset = true;
+  });
+  annotateColors?.querySelector('.annotate-color-custom')?.classList.toggle('active', !hasPreset);
+  if (annotateColorCustom) annotateColorCustom.value = current;
+}
+
+function setAnnotationColor(color, options = { applyToSelection: true }) {
+  annotationColor = normalizeHexColor(color);
+  updateColorPickerUI();
+  if (options.applyToSelection && isSelectionTool() && selectedStrokeIdx >= 0) {
+    annotationStrokes[selectedStrokeIdx].color = annotationColor;
+    markAnnotationsChanged();
+    redrawAnnotations();
+  }
+}
+
+function syncColorPickerToSelection() {
+  if (selectedStrokeIdx < 0) return;
+  const stroke = annotationStrokes[selectedStrokeIdx];
+  if (!stroke) return;
+  if (stroke.color) {
+    annotationColor = normalizeHexColor(stroke.color);
+    updateColorPickerUI();
+  }
+}
 
 function revokeImageUrl() {
   if (imageObjectUrl) {
@@ -198,9 +251,9 @@ function redrawAnnotations() {
   if (annotationDraft?.type === 'pen' && annotationDraft.points?.length > 1) {
     drawStroke(ctx, annotationDraft, color);
   } else if (annotationDraft?.type === 'arrow') {
-    drawArrow(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, color, 3);
+    drawArrow(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, annotationDraft.color || color, annotationDraft.width || 3);
   } else if (annotationDraft?.type === 'square') {
-    drawRect(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, color, 3);
+    drawRect(ctx, annotationDraft.x1, annotationDraft.y1, annotationDraft.x2, annotationDraft.y2, annotationDraft.color || color, annotationDraft.width || 3);
   }
 }
 
@@ -535,6 +588,8 @@ async function loadShot(shot) {
   moveStartPoint = null;
   moveSnapshot = null;
   setAnnotationTool('pen');
+  annotationColor = getDefaultAnnotationColor();
+  updateColorPickerUI();
 
   viewerImg.onerror = () => {
     showToast('Could not load screenshot');
@@ -679,6 +734,11 @@ annotateUndo.addEventListener('click', () => {
 });
 annotateSave.addEventListener('click', () => saveAnnotations());
 
+annotateColors?.querySelectorAll('.annotate-color[data-color]').forEach(btn => {
+  btn.addEventListener('click', () => setAnnotationColor(btn.dataset.color));
+});
+annotateColorCustom?.addEventListener('input', e => setAnnotationColor(e.target.value));
+
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeViewer();
@@ -708,6 +768,7 @@ viewerCanvas.addEventListener('pointerdown', e => {
   if (annotationTool === 'select') {
     const idx = hitTestStroke(p);
     selectedStrokeIdx = idx;
+    syncColorPickerToSelection();
     updateDeleteBtn();
     redrawAnnotations();
     return;
@@ -716,6 +777,7 @@ viewerCanvas.addEventListener('pointerdown', e => {
     const idx = hitTestStroke(p);
     if (idx >= 0) {
       selectedStrokeIdx = idx;
+      syncColorPickerToSelection();
       movingStrokeIdx = idx;
       moveStartPoint = p;
       moveSnapshot = cloneStroke(annotationStrokes[idx]);
@@ -730,15 +792,15 @@ viewerCanvas.addEventListener('pointerdown', e => {
     return;
   }
   if (annotationTool === 'pen') {
-    annotationDraft = { type: 'pen', points: [p], color: null, width: 3 };
+    annotationDraft = { type: 'pen', points: [p], color: annotationColor, width: 3 };
   } else if (annotationTool === 'arrow') {
-    annotationDraft = { type: 'arrow', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: null, width: 3 };
+    annotationDraft = { type: 'arrow', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: annotationColor, width: 3 };
   } else if (annotationTool === 'square') {
-    annotationDraft = { type: 'square', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: null, width: 3 };
+    annotationDraft = { type: 'square', x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: annotationColor, width: 3 };
   } else if (annotationTool === 'text') {
     const label = prompt('Label text');
     if (label?.trim()) {
-      annotationStrokes.push({ type: 'text', text: label.trim(), x: p.x, y: p.y, size: 16 });
+      annotationStrokes.push({ type: 'text', text: label.trim(), x: p.x, y: p.y, size: 16, color: annotationColor });
       markAnnotationsChanged();
       redrawAnnotations();
     }
@@ -775,6 +837,7 @@ viewerCanvas.addEventListener('wheel', e => {
   e.preventDefault();
   if (hit >= 0) {
     selectedStrokeIdx = hit;
+    syncColorPickerToSelection();
     updateDeleteBtn();
   }
   const s = annotationStrokes[idx];
@@ -831,6 +894,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   try {
     const data = await readLocal(['settings', 'screenshots']);
     applyTheme(data.settings?.theme);
+    annotationColor = getDefaultAnnotationColor();
+    updateColorPickerUI();
     const shot = (data.screenshots || []).find(s => s.id === shotId);
     if (!shot?.dataUrl) {
       showMissing();

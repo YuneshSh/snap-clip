@@ -40,6 +40,21 @@
       <button type="button" class="annotate-tool" id="annotateArrow" title="Arrow">Arrow</button>
       <button type="button" class="annotate-tool" id="annotateSquare" title="Square · click and drag">Square</button>
       <button type="button" class="annotate-tool" id="annotateText" title="Text label">Text</button>
+      <div class="annotate-divider" aria-hidden="true"></div>
+      <div class="annotate-colors" id="annotateColors" role="radiogroup" aria-label="Annotation color">
+        <button type="button" class="annotate-color active" data-color="#38bdf8" title="Cyan" style="--c:#38bdf8"></button>
+        <button type="button" class="annotate-color" data-color="#f87171" title="Red" style="--c:#f87171"></button>
+        <button type="button" class="annotate-color" data-color="#fbbf24" title="Yellow" style="--c:#fbbf24"></button>
+        <button type="button" class="annotate-color" data-color="#34d399" title="Green" style="--c:#34d399"></button>
+        <button type="button" class="annotate-color" data-color="#ffffff" title="White" style="--c:#ffffff"></button>
+        <button type="button" class="annotate-color" data-color="#1f2937" title="Dark" style="--c:#1f2937"></button>
+        <button type="button" class="annotate-color" data-color="#a78bfa" title="Purple" style="--c:#a78bfa"></button>
+        <button type="button" class="annotate-color" data-color="#f472b6" title="Pink" style="--c:#f472b6"></button>
+        <label class="annotate-color annotate-color-custom" title="Custom color">
+          <input type="color" id="annotateColorCustom" value="#38bdf8" aria-label="Custom color" />
+        </label>
+      </div>
+      <div class="annotate-divider" aria-hidden="true"></div>
       <button type="button" class="annotate-tool" id="annotateSelect" title="Select · ↑↓ scroll to resize">Select</button>
       <button type="button" class="annotate-tool" id="annotateMove" title="Drag to reposition">Move</button>
       <button type="button" class="annotate-tool danger" id="annotateDelete" title="Delete selected" disabled>Delete</button>
