@@ -59,7 +59,7 @@ body {
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  padding: 8px 12px;
+  padding: 3px 8px 3px 10px;
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
 }
@@ -88,8 +88,8 @@ body {
 .viewer-bar-actions { display: flex; align-items: center; gap: 2px; }
 
 .viewer-btn {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -107,17 +107,17 @@ body {
 .viewer-tools {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
-  padding: 8px 12px;
+  padding: 3px 8px;
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
   flex-wrap: wrap;
 }
 
 .annotate-tool {
-  height: 30px;
-  padding: 0 12px;
+  height: 26px;
+  padding: 0 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
@@ -148,7 +148,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 0;
   background:
     repeating-conic-gradient(rgba(255,255,255,0.02) 0% 25%, transparent 0% 50%) 50% / 20px 20px,
     var(--bg-2);
@@ -176,8 +176,8 @@ body {
   display: block;
   width: auto;
   height: auto;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 
 .viewer-empty {

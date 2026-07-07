@@ -126,15 +126,16 @@ async function openViewerWindow(shotId, width, height) {
   }
 
   const url = chrome.runtime.getURL(`viewer.html?id=${encodeURIComponent(shotId)}`);
-  const w = Math.min(Math.max(Number(width) || 1200, 640), 1600);
-  const h = Math.min(Math.max(Number(height) || 860, 480), 1200);
+  const w = Math.max(Number(width) || 1200, 640);
+  const h = Math.max(Number(height) || 860, 480);
 
   const win = await chrome.windows.create({
     url,
     type: 'popup',
     width: w,
     height: h,
-    focused: true
+    focused: true,
+    state: 'maximized'
   });
 
   if (win?.id != null) {

@@ -113,11 +113,22 @@ function parseAnnotations(shot) {
   }
 }
 
+function workspaceMaxSize() {
+  const pad = 0;
+  const bar = document.querySelector('.viewer-bar');
+  const tools = document.querySelector('.viewer-tools');
+  const chromeH =
+    (bar?.getBoundingClientRect().height || 0) +
+    (tools?.getBoundingClientRect().height || 0);
+  const workspaceRect = viewerWorkspace?.getBoundingClientRect();
+  const maxW = Math.floor((workspaceRect?.width || window.innerWidth) - pad * 2);
+  const maxH = Math.floor((workspaceRect?.height || window.innerHeight - chromeH) - pad * 2);
+  return { maxW: Math.max(maxW, 1), maxH: Math.max(maxH, 1) };
+}
+
 function resizeAnnotationCanvas() {
   if (!viewerImg.naturalWidth || !viewerWorkspace) return;
-  const pad = 8;
-  const maxW = viewerWorkspace.clientWidth - pad * 2;
-  const maxH = viewerWorkspace.clientHeight - pad * 2;
+  const { maxW, maxH } = workspaceMaxSize();
   if (maxW <= 0 || maxH <= 0) return;
   const ratio = viewerImg.naturalWidth / viewerImg.naturalHeight;
   let w = maxW;
@@ -126,8 +137,8 @@ function resizeAnnotationCanvas() {
     h = maxH;
     w = h * ratio;
   }
-  w = Math.max(1, Math.floor(w));
-  h = Math.max(1, Math.floor(h));
+  w = Math.max(1, Math.round(w));
+  h = Math.max(1, Math.round(h));
   viewerImg.style.width = `${w}px`;
   viewerImg.style.height = `${h}px`;
   viewerCanvas.width = w;
@@ -137,9 +148,17 @@ function resizeAnnotationCanvas() {
   redrawAnnotations();
 }
 
-if (viewerWorkspace) {
-  new ResizeObserver(() => resizeAnnotationCanvas()).observe(viewerWorkspace);
+function scheduleResize() {
+  requestAnimationFrame(() => {
+    resizeAnnotationCanvas();
+    requestAnimationFrame(resizeAnnotationCanvas);
+  });
 }
+
+if (viewerWorkspace) {
+  new ResizeObserver(() => scheduleResize()).observe(viewerWorkspace);
+}
+window.addEventListener('resize', scheduleResize);
 
 function canvasPoint(e) {
   const rect = viewerCanvas.getBoundingClientRect();
@@ -285,19 +304,11 @@ async function loadShot(shot) {
   viewerImg.onerror = () => {
     showToast('Could not load screenshot');
   };
-  viewerImg.onload = () => {
-    requestAnimationFrame(() => {
-      resizeAnnotationCanvas();
-      requestAnimationFrame(resizeAnnotationCanvas);
-    });
-  };
+  viewerImg.onload = () => scheduleResize();
 
   try {
     await assignImageSrc(shot.dataUrl);
-    requestAnimationFrame(() => {
-      resizeAnnotationCanvas();
-      requestAnimationFrame(resizeAnnotationCanvas);
-    });
+    scheduleResize();
   } catch {
     showMissing();
   }

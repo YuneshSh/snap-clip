@@ -1452,8 +1452,8 @@ async function openLightbox(shot) {
   try {
     const res = await send('OPEN_VIEWER', {
       id: shot.id,
-      width: Math.round(window.screen?.availWidth * 0.92) || 1200,
-      height: Math.round(window.screen?.availHeight * 0.92) || 860
+      width: Math.round(window.screen?.availWidth * 0.98) || 1200,
+      height: Math.round(window.screen?.availHeight * 0.98) || 860
     });
     if (res && res.success === false) {
       showToast('Could not open preview');
