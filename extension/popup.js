@@ -64,21 +64,29 @@ let capturing     = false;
 let autoCaptured  = false;
 let lastTextSeen  = null;
 
-const POPUP_WIDTH = 400;
+const POPUP_WIDTH  = 520;
+const POPUP_HEIGHT = 600;
 
-/** Chrome may shrink the popup when tab content changes — lock width explicitly. */
-function lockPopupWidth() {
+/** Chrome may resize the popup when tab content changes — lock dimensions explicitly. */
+function lockPopupSize() {
   const w = `${POPUP_WIDTH}px`;
+  const h = `${POPUP_HEIGHT}px`;
   document.documentElement.style.width = w;
   document.documentElement.style.minWidth = w;
   document.documentElement.style.maxWidth = w;
+  document.documentElement.style.height = h;
+  document.documentElement.style.minHeight = h;
+  document.documentElement.style.maxHeight = h;
   document.body.style.width = w;
   document.body.style.minWidth = w;
   document.body.style.maxWidth = w;
+  document.body.style.height = h;
+  document.body.style.minHeight = h;
+  document.body.style.maxHeight = h;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────
-lockPopupWidth();
+lockPopupSize();
 (async () => {
   [settings, screenshots, texts, bookmarks, notes] = await Promise.all([
     send('GET_SETTINGS'),
@@ -99,7 +107,7 @@ lockPopupWidth();
   updatePinnedDrawer();
   initCalendar();
   renderTicker();
-  lockPopupWidth();
+  lockPopupSize();
 
   // Silently pull the last screenshot / text from the clipboard on open.
   autoCapture();
@@ -158,7 +166,7 @@ function switchTab(tab) {
   }
   updateCountBadge();
   updatePinnedDrawer();
-  lockPopupWidth();
+  lockPopupSize();
 }
 tabSnaps.addEventListener('click', () => switchTab('snaps'));
 tabTexts.addEventListener('click', () => switchTab('texts'));

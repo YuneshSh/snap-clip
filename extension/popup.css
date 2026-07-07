@@ -33,6 +33,10 @@
   --shadow-sm:  0 1px 2px rgba(0,0,0,.4);
   --shadow-md:  0 8px 24px rgba(0,0,0,.45);
   --transition: 150ms ease;
+
+  /* Popup shell — Chrome allows up to ~800×600 */
+  --popup-width:  520px;
+  --popup-height: 600px;
 }
 
 /* ── Accent palettes (modern, all tuned for the translucent look) ── */
@@ -47,17 +51,18 @@
 
 html {
   font-size: 14px;
-  width: 400px;
-  min-width: 400px;
-  max-width: 400px;
+  width: var(--popup-width);
+  min-width: var(--popup-width);
+  max-width: var(--popup-width);
 }
 
 body {
-  width: 400px;
-  min-width: 400px;
-  max-width: 400px;
-  min-height: 200px;
-  max-height: 580px;
+  width: var(--popup-width);
+  min-width: var(--popup-width);
+  max-width: var(--popup-width);
+  height: var(--popup-height);
+  min-height: var(--popup-height);
+  max-height: var(--popup-height);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   /* Slightly translucent, frosted background. */
   background:
@@ -76,9 +81,10 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  min-width: 400px;
+  min-width: var(--popup-width);
   height: 100%;
-  max-height: 580px;
+  min-height: var(--popup-height);
+  max-height: var(--popup-height);
   overflow: hidden;
 }
 
@@ -88,7 +94,7 @@ body {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-width: 400px;
+  min-width: var(--popup-width);
   flex-shrink: 0;
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.02);
@@ -575,7 +581,7 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
   display: flex;
   gap: 4px;
   width: 100%;
-  min-width: 400px;
+  min-width: var(--popup-width);
   padding: 8px 12px 0;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
@@ -612,7 +618,7 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 .main {
   flex: 1;
   min-height: 0;
-  min-width: 400px;
+  min-width: var(--popup-width);
   width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
@@ -646,6 +652,7 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 
 /* ── Card (framed photo look) ── */
 .card {
+  min-width: 0;
   background: linear-gradient(180deg, var(--surface-2), var(--surface));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -908,7 +915,7 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 .ticker {
   display: flex; align-items: center; gap: 8px;
   width: 100%;
-  min-width: 400px;
+  min-width: var(--popup-width);
   padding: 5px 12px;
   background: rgba(var(--accent-rgb), 0.09);
   border-bottom: 1px solid var(--border);
@@ -938,7 +945,7 @@ button.cal-cell:hover { background: var(--surface-2); color: var(--text); }
 .pinned-drawer {
   flex-shrink: 0;
   width: 100%;
-  min-width: 400px;
+  min-width: var(--popup-width);
   border-top: 1px solid var(--border-strong);
   background: rgba(255, 255, 255, 0.02);
   backdrop-filter: blur(8px);
