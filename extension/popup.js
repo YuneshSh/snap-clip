@@ -1271,7 +1271,12 @@ let annotationStrokes = [];
 let annotationDraft = null;
 let annotationDirty = false;
 let movingTextIdx = -1;
+let selectedTextIdx = -1;
 let moveDragOffset = { x: 0, y: 0 };
+
+const TEXT_SIZE_MIN = 10;
+const TEXT_SIZE_MAX = 96;
+const TEXT_SIZE_STEP = 2;
 
 function parseAnnotations(shot) {
   if (!shot?.annotations) return { strokes: [], displayW: 0, displayH: 0 };
@@ -1289,8 +1294,10 @@ function parseAnnotations(shot) {
 
 function resizeAnnotationCanvas() {
   if (!lightboxImg.naturalWidth || !lightboxImgwrap) return;
-  const maxW = lightboxImgwrap.clientWidth - 20;
-  const maxH = lightboxImgwrap.clientHeight - 20;
+  const pad = 2;
+  const maxW = lightboxImgwrap.clientWidth - pad * 2;
+  const maxH = lightboxImgwrap.clientHeight - pad * 2;
+  if (maxW <= 0 || maxH <= 0) return;
   const ratio = lightboxImg.naturalWidth / lightboxImg.naturalHeight;
   let w = maxW;
   let h = w / ratio;
@@ -1309,6 +1316,12 @@ function resizeAnnotationCanvas() {
   redrawAnnotations();
 }
 
+if (lightboxImgwrap) {
+  new ResizeObserver(() => {
+    if (lightbox.classList.contains('open')) resizeAnnotationCanvas();
+  }).observe(lightboxImgwrap);
+}
+
 function canvasPoint(e) {
   const rect = lightboxCanvas.getBoundingClientRect();
   const scaleX = lightboxCanvas.width / rect.width;
@@ -1325,8 +1338,11 @@ function redrawAnnotations() {
   ctx.clearRect(0, 0, lightboxCanvas.width, lightboxCanvas.height);
   const color = getComputedStyle(document.documentElement).getPropertyValue('--accent-400').trim() || '#38bdf8';
 
-  for (const stroke of annotationStrokes) {
-    drawStroke(ctx, stroke, color);
+  for (let i = 0; i < annotationStrokes.length; i++) {
+    drawStroke(ctx, annotationStrokes[i], color);
+    if (annotationTool === 'move' && i === selectedTextIdx) {
+      drawTextSelection(ctx, annotationStrokes[i], color);
+    }
   }
 
   if (annotationDraft?.type === 'pen' && annotationDraft.points?.length > 1) {
@@ -1376,6 +1392,33 @@ function drawArrow(ctx, x1, y1, x2, y2, color, width) {
   ctx.fill();
 }
 
+function drawTextSelection(ctx, stroke, color) {
+  if (stroke.type !== 'text' || !stroke.text) return;
+  const size = stroke.size || 16;
+  ctx.font = `600 ${size}px system-ui, sans-serif`;
+  const w = ctx.measureText(stroke.text).width;
+  const pad = 4;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.65;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(stroke.x - pad, stroke.y - size - pad, w + pad * 2, size + pad * 2);
+  ctx.restore();
+}
+
+function adjustTextSize(idx, delta) {
+  if (idx < 0) return;
+  const s = annotationStrokes[idx];
+  if (s?.type !== 'text') return;
+  const cur = s.size || 16;
+  const next = Math.min(TEXT_SIZE_MAX, Math.max(TEXT_SIZE_MIN, cur + delta));
+  if (next === cur) return;
+  s.size = next;
+  annotationDirty = true;
+  redrawAnnotations();
+}
+
 function hitTestTextStroke(p) {
   const ctx = lightboxCanvas.getContext('2d');
   if (!ctx) return -1;
@@ -1396,6 +1439,7 @@ function hitTestTextStroke(p) {
 function setAnnotationTool(tool) {
   annotationTool = tool;
   movingTextIdx = -1;
+  if (tool !== 'move') selectedTextIdx = -1;
   [annotatePen, annotateArrow, annotateText, annotateMove].forEach(btn => btn.classList.remove('active'));
   if (tool === 'pen') annotatePen.classList.add('active');
   if (tool === 'arrow') annotateArrow.classList.add('active');
@@ -1407,8 +1451,10 @@ function setAnnotationTool(tool) {
 function openLightbox(shot) {
   currentShot = shot;
   lightboxImg.onload = () => {
-    resizeAnnotationCanvas();
-    requestAnimationFrame(resizeAnnotationCanvas);
+    requestAnimationFrame(() => {
+      resizeAnnotationCanvas();
+      requestAnimationFrame(resizeAnnotationCanvas);
+    });
   };
   lightboxImg.src = shot.dataUrl;
   const parsed = parseAnnotations(shot);
@@ -1416,10 +1462,15 @@ function openLightbox(shot) {
   annotationDraft = null;
   annotationDirty = false;
   movingTextIdx = -1;
+  selectedTextIdx = -1;
   setAnnotationTool('pen');
   lightboxTime.textContent = formatTime(shot.savedAt);
   lightbox.classList.add('open');
   lightbox.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => {
+    resizeAnnotationCanvas();
+    requestAnimationFrame(resizeAnnotationCanvas);
+  });
 }
 
 function closeLightbox() {
@@ -1503,7 +1554,20 @@ lightboxBackdrop.addEventListener('click', closeLightbox);
 lightboxCopy.addEventListener('click', () => { if (currentShot) copyToClipboard(currentShot); });
 lightboxSave.addEventListener('click', () => { if (currentShot) downloadImage(currentShot); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && lightbox.classList.contains('open')) closeLightbox();
+  if (!lightbox.classList.contains('open')) return;
+  if (e.key === 'Escape') {
+    closeLightbox();
+    return;
+  }
+  if (annotationTool === 'move' && selectedTextIdx >= 0) {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      adjustTextSize(selectedTextIdx, TEXT_SIZE_STEP);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      adjustTextSize(selectedTextIdx, -TEXT_SIZE_STEP);
+    }
+  }
 });
 
 annotatePen.addEventListener('click', () => setAnnotationTool('pen'));
@@ -1525,10 +1589,15 @@ lightboxCanvas.addEventListener('pointerdown', e => {
   if (annotationTool === 'move') {
     const idx = hitTestTextStroke(p);
     if (idx >= 0) {
+      selectedTextIdx = idx;
       movingTextIdx = idx;
       const s = annotationStrokes[idx];
       moveDragOffset = { x: p.x - s.x, y: p.y - s.y };
       lightboxCanvas.classList.add('dragging');
+      redrawAnnotations();
+    } else {
+      selectedTextIdx = -1;
+      redrawAnnotations();
     }
     return;
   }
@@ -1566,6 +1635,18 @@ lightboxCanvas.addEventListener('pointermove', e => {
     redrawAnnotations();
   }
 });
+
+lightboxCanvas.addEventListener('wheel', e => {
+  if (!currentShot || annotationTool !== 'move') return;
+  const p = canvasPoint(e);
+  const hit = hitTestTextStroke(p);
+  const idx = hit >= 0 ? hit : selectedTextIdx;
+  if (idx < 0) return;
+  e.preventDefault();
+  if (hit >= 0) selectedTextIdx = hit;
+  const delta = e.deltaY < 0 ? TEXT_SIZE_STEP : -TEXT_SIZE_STEP;
+  adjustTextSize(idx, delta);
+}, { passive: false });
 
 lightboxCanvas.addEventListener('pointerup', () => {
   if (movingTextIdx >= 0) {
