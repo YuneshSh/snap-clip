@@ -13,7 +13,8 @@ const viewerSave = $('viewerSave');
 const annotatePen = $('annotatePen');
 const annotateArrow = $('annotateArrow');
 const annotateText = $('annotateText');
-const annotateMove = $('annotateMove');
+const annotateSelect = $('annotateSelect');
+const annotateDelete = $('annotateDelete');
 const annotateUndo = $('annotateUndo');
 const annotateSave = $('annotateSave');
 
@@ -182,7 +183,7 @@ function redrawAnnotations() {
 
   for (let i = 0; i < annotationStrokes.length; i++) {
     drawStroke(ctx, annotationStrokes[i], color);
-    if (annotationTool === 'move' && i === selectedStrokeIdx) {
+    if (annotationTool === 'select' && i === selectedStrokeIdx) {
       drawStrokeSelection(ctx, annotationStrokes[i], color);
     }
   }
@@ -377,18 +378,41 @@ function adjustStrokeSize(idx, delta) {
   redrawAnnotations();
 }
 
+function updateDeleteBtn() {
+  if (!annotateDelete) return;
+  const canDelete = annotationTool === 'select' && selectedStrokeIdx >= 0;
+  annotateDelete.disabled = !canDelete;
+}
+
+function deleteSelectedStroke() {
+  if (selectedStrokeIdx < 0) {
+    showToast('Select an annotation first');
+    return;
+  }
+  annotationStrokes.splice(selectedStrokeIdx, 1);
+  selectedStrokeIdx = -1;
+  movingStrokeIdx = -1;
+  moveStartPoint = null;
+  moveSnapshot = null;
+  annotationDirty = true;
+  redrawAnnotations();
+  updateDeleteBtn();
+  showToast('Annotation deleted');
+}
+
 function setAnnotationTool(tool) {
   annotationTool = tool;
   movingStrokeIdx = -1;
   moveStartPoint = null;
   moveSnapshot = null;
-  if (tool !== 'move') selectedStrokeIdx = -1;
-  [annotatePen, annotateArrow, annotateText, annotateMove].forEach(btn => btn.classList.remove('active'));
+  if (tool !== 'select') selectedStrokeIdx = -1;
+  [annotatePen, annotateArrow, annotateText, annotateSelect].forEach(btn => btn.classList.remove('active'));
   if (tool === 'pen') annotatePen.classList.add('active');
   if (tool === 'arrow') annotateArrow.classList.add('active');
   if (tool === 'text') annotateText.classList.add('active');
-  if (tool === 'move') annotateMove.classList.add('active');
-  viewerCanvas.classList.toggle('move-mode', tool === 'move');
+  if (tool === 'select') annotateSelect.classList.add('active');
+  viewerCanvas.classList.toggle('select-mode', tool === 'select');
+  updateDeleteBtn();
   redrawAnnotations();
 }
 
@@ -538,7 +562,8 @@ viewerSave.addEventListener('click', downloadImage);
 annotatePen.addEventListener('click', () => setAnnotationTool('pen'));
 annotateArrow.addEventListener('click', () => setAnnotationTool('arrow'));
 annotateText.addEventListener('click', () => setAnnotationTool('text'));
-annotateMove.addEventListener('click', () => setAnnotationTool('move'));
+annotateSelect.addEventListener('click', () => setAnnotationTool('select'));
+annotateDelete.addEventListener('click', () => deleteSelectedStroke());
 annotateUndo.addEventListener('click', () => {
   if (!annotationStrokes.length) return;
   annotationStrokes.pop();
@@ -552,7 +577,7 @@ document.addEventListener('keydown', e => {
     closeViewer();
     return;
   }
-  if (annotationTool === 'move' && selectedStrokeIdx >= 0) {
+  if (annotationTool === 'select' && selectedStrokeIdx >= 0) {
     const s = annotationStrokes[selectedStrokeIdx];
     const step = s?.type === 'text' ? TEXT_SIZE_STEP : STROKE_WIDTH_STEP;
     if (e.key === 'ArrowUp') {
@@ -563,13 +588,17 @@ document.addEventListener('keydown', e => {
       adjustStrokeSize(selectedStrokeIdx, -step);
     }
   }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && annotationTool === 'select' && selectedStrokeIdx >= 0) {
+    e.preventDefault();
+    deleteSelectedStroke();
+  }
 });
 
 viewerCanvas.addEventListener('pointerdown', e => {
   if (!currentShot) return;
   viewerCanvas.setPointerCapture(e.pointerId);
   const p = canvasPoint(e);
-  if (annotationTool === 'move') {
+  if (annotationTool === 'select') {
     const idx = hitTestStroke(p);
     if (idx >= 0) {
       selectedStrokeIdx = idx;
@@ -577,9 +606,11 @@ viewerCanvas.addEventListener('pointerdown', e => {
       moveStartPoint = p;
       moveSnapshot = cloneStroke(annotationStrokes[idx]);
       viewerCanvas.classList.add('dragging');
+      updateDeleteBtn();
       redrawAnnotations();
     } else {
       selectedStrokeIdx = -1;
+      updateDeleteBtn();
       redrawAnnotations();
     }
     return;
@@ -620,13 +651,16 @@ viewerCanvas.addEventListener('pointermove', e => {
 });
 
 viewerCanvas.addEventListener('wheel', e => {
-  if (!currentShot || annotationTool !== 'move') return;
+  if (!currentShot || annotationTool !== 'select') return;
   const p = canvasPoint(e);
   const hit = hitTestStroke(p);
   const idx = hit >= 0 ? hit : selectedStrokeIdx;
   if (idx < 0) return;
   e.preventDefault();
-  if (hit >= 0) selectedStrokeIdx = hit;
+  if (hit >= 0) {
+    selectedStrokeIdx = hit;
+    updateDeleteBtn();
+  }
   const s = annotationStrokes[idx];
   const step = s?.type === 'text' ? TEXT_SIZE_STEP : STROKE_WIDTH_STEP;
   const delta = e.deltaY < 0 ? step : -step;

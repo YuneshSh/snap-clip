@@ -141,6 +141,18 @@ body {
   border-color: rgba(var(--accent-rgb), 0.35);
 }
 .annotate-tool.primary:hover { background: rgba(var(--accent-rgb), 0.24); }
+.annotate-tool.danger {
+  color: var(--red-400);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.annotate-tool.danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.14);
+  color: var(--red-400);
+}
+.annotate-tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .viewer-workspace {
   flex: 1;
@@ -169,8 +181,8 @@ body {
   cursor: crosshair;
   touch-action: none;
 }
-.viewer-canvas.move-mode { cursor: grab; }
-.viewer-canvas.move-mode.dragging { cursor: grabbing; }
+.viewer-canvas.select-mode { cursor: grab; }
+.viewer-canvas.select-mode.dragging { cursor: grabbing; }
 
 .viewer-img {
   display: block;
