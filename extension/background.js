@@ -14,6 +14,7 @@ let nativeConnected = false;
 let reconnectDelay = RECONNECT_MIN_MS;
 let reconnectTimer = null;
 const imageBuffers = new Map(); // id -> { parts: string[], total: number }
+let clipboardSuppressUntil = 0;
 
 // Reflect the companion's live state to any open popup (best-effort: the popup
 // may not be open, so ignore "no receiver" errors).
@@ -264,6 +265,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CLOSE_VIEWER':
       closeViewerWindow(message.windowId).then(sendResponse);
       return true;
+    case 'SUPPRESS_CLIPBOARD_CAPTURE':
+      clipboardSuppressUntil = Date.now() + (message.ms || 2500);
+      sendResponse({ success: true });
+      return false;
   }
 });
 
@@ -310,6 +315,9 @@ function saveScreenshot(dataUrl) {
 }
 
 async function doSaveScreenshot(dataUrl) {
+  if (Date.now() < clipboardSuppressUntil) {
+    return { success: false, reason: 'suppressed' };
+  }
   const settings = await getSettings();
   const screenshots = await getScreenshots();
 
@@ -403,6 +411,9 @@ function saveText(text) {
 async function doSaveText(text) {
   const value = (text || '').trim();
   if (!value) return { success: false, reason: 'empty' };
+  if (Date.now() < clipboardSuppressUntil) {
+    return { success: false, reason: 'suppressed' };
+  }
 
   const settings = await getSettings();
   const texts = await getTexts();

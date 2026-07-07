@@ -40,6 +40,11 @@ let moveStartPoint = null;
 let moveSnapshot = null;
 let toastTimer = null;
 let imageObjectUrl = null;
+let autoSyncTimer = null;
+let autoSyncInFlight = false;
+let autoSyncQueued = false;
+
+const AUTO_SYNC_MS = 400;
 
 function revokeImageUrl() {
   if (imageObjectUrl) {
@@ -377,6 +382,66 @@ function adjustStrokeSize(idx, delta) {
 
   annotationDirty = true;
   redrawAnnotations();
+  scheduleAutoSync();
+}
+
+function markAnnotationsChanged(options = { sync: true }) {
+  annotationDirty = true;
+  if (options.sync) scheduleAutoSync();
+}
+
+function scheduleAutoSync() {
+  clearTimeout(autoSyncTimer);
+  autoSyncTimer = setTimeout(() => flushAutoSync(), AUTO_SYNC_MS);
+}
+
+async function flushAutoSync(showFeedback = false) {
+  if (!currentShot) return;
+  if (!annotationDirty && !showFeedback) return;
+  if (autoSyncInFlight) {
+    autoSyncQueued = true;
+    return;
+  }
+  autoSyncInFlight = true;
+  try {
+    await autoSaveAndCopy(showFeedback);
+  } finally {
+    autoSyncInFlight = false;
+    if (autoSyncQueued) {
+      autoSyncQueued = false;
+      if (annotationDirty) scheduleAutoSync();
+    }
+  }
+}
+
+async function autoSaveAndCopy(showFeedback = false) {
+  if (!currentShot) return;
+
+  const payload = JSON.stringify({
+    version: 1,
+    displayW: viewerCanvas.width,
+    displayH: viewerCanvas.height,
+    strokes: annotationStrokes
+  });
+  const shotForRender = { ...currentShot, annotations: payload };
+
+  await send('UPDATE_SCREENSHOT', { id: currentShot.id, patch: { annotations: payload } });
+  currentShot = { ...currentShot, annotations: payload };
+  annotationDirty = false;
+
+  const dataUrl = annotationStrokes.length
+    ? await flattenAnnotatedImage(shotForRender, parseAnnotations(shotForRender))
+    : currentShot.dataUrl;
+
+  try {
+    await send('SUPPRESS_CLIPBOARD_CAPTURE', { ms: 2500 });
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    if (showFeedback) showToast('Saved & copied — ready to paste');
+  } catch {
+    if (showFeedback) showToast('Saved — clipboard copy failed');
+  }
 }
 
 function isSelectionTool() {
@@ -398,10 +463,9 @@ function deleteSelectedStroke() {
   movingStrokeIdx = -1;
   moveStartPoint = null;
   moveSnapshot = null;
-  annotationDirty = true;
+  markAnnotationsChanged();
   redrawAnnotations();
   updateDeleteBtn();
-  showToast('Annotation deleted');
 }
 
 function setAnnotationTool(tool) {
@@ -432,6 +496,7 @@ async function loadShot(shot) {
   annotationStrokes = parsed.strokes;
   annotationDraft = null;
   annotationDirty = false;
+  clearTimeout(autoSyncTimer);
   movingStrokeIdx = -1;
   selectedStrokeIdx = -1;
   moveStartPoint = null;
@@ -460,17 +525,7 @@ function showMissing() {
 }
 
 async function saveAnnotations() {
-  if (!currentShot) return;
-  const payload = JSON.stringify({
-    version: 1,
-    displayW: viewerCanvas.width,
-    displayH: viewerCanvas.height,
-    strokes: annotationStrokes
-  });
-  await send('UPDATE_SCREENSHOT', { id: currentShot.id, patch: { annotations: payload } });
-  currentShot = { ...currentShot, annotations: payload };
-  annotationDirty = false;
-  showToast('Annotations saved');
+  await flushAutoSync(true);
 }
 
 async function flattenAnnotatedImage(shot, parsed) {
@@ -523,6 +578,10 @@ async function getShotDataUrl(shot) {
 
 async function copyToClipboard() {
   if (!currentShot) return;
+  if (annotationDirty) {
+    await flushAutoSync(true);
+    return;
+  }
   try {
     const dataUrl = await getShotDataUrl(currentShot);
     const res = await fetch(dataUrl);
@@ -546,19 +605,26 @@ function downloadImage() {
 }
 
 function closeViewer() {
-  if (annotationDirty && !confirm('You have unsaved annotations. Close anyway?')) return;
-  revokeImageUrl();
-  if (chrome.runtime?.id && chrome.windows?.getCurrent) {
-    chrome.windows.getCurrent((win) => {
-      if (win?.id != null) {
-        chrome.windows.remove(win.id);
-      } else {
-        send('CLOSE_VIEWER').catch(() => window.close());
-      }
-    });
+  clearTimeout(autoSyncTimer);
+  const done = () => {
+    revokeImageUrl();
+    if (chrome.runtime?.id && chrome.windows?.getCurrent) {
+      chrome.windows.getCurrent((win) => {
+        if (win?.id != null) {
+          chrome.windows.remove(win.id);
+        } else {
+          send('CLOSE_VIEWER').catch(() => window.close());
+        }
+      });
+      return;
+    }
+    window.close();
+  };
+  if (annotationDirty) {
+    flushAutoSync().finally(done);
     return;
   }
-  window.close();
+  done();
 }
 
 viewerClose.addEventListener('click', closeViewer);
@@ -574,7 +640,7 @@ annotateDelete.addEventListener('click', () => deleteSelectedStroke());
 annotateUndo.addEventListener('click', () => {
   if (!annotationStrokes.length) return;
   annotationStrokes.pop();
-  annotationDirty = true;
+  markAnnotationsChanged();
   redrawAnnotations();
 });
 annotateSave.addEventListener('click', () => saveAnnotations());
@@ -637,7 +703,7 @@ viewerCanvas.addEventListener('pointerdown', e => {
     const label = prompt('Label text');
     if (label?.trim()) {
       annotationStrokes.push({ type: 'text', text: label.trim(), x: p.x, y: p.y, size: 16 });
-      annotationDirty = true;
+      markAnnotationsChanged();
       redrawAnnotations();
     }
   }
@@ -687,6 +753,7 @@ viewerCanvas.addEventListener('pointerup', () => {
     moveStartPoint = null;
     moveSnapshot = null;
     viewerCanvas.classList.remove('dragging');
+    if (annotationDirty) scheduleAutoSync();
     return;
   }
   if (!annotationDraft) return;
@@ -696,7 +763,7 @@ viewerCanvas.addEventListener('pointerup', () => {
     annotationStrokes.push({ ...annotationDraft });
   }
   annotationDraft = null;
-  annotationDirty = true;
+  markAnnotationsChanged();
   redrawAnnotations();
 });
 

@@ -486,6 +486,8 @@ window.chrome = {
           window.open(url, '_blank', `noopener,width=${w},height=${h}`);
           return Promise.resolve({ success: true });
         }
+        case 'SUPPRESS_CLIPBOARD_CAPTURE':
+          return Promise.resolve({ success: true });
         default: return Promise.resolve(null);
       }
     },
