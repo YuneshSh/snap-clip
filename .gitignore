@@ -1,5 +1,8 @@
 node_modules/
 .env
+unpacked/
+
+# Compiled native host binary (rebuilt by native-host/install.sh)
 
 # Compiled native host binary (rebuilt by native-host/install.sh)
 native-host/snapclip-clipboard-host

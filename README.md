@@ -5,15 +5,14 @@ download, or delete them later.
 
 ## Extension
 
-Load `extension/` as an unpacked extension at `chrome://extensions` (enable
-Developer Mode → "Load unpacked"). Leave Developer Mode on — Chrome 134+
-disables unpacked extensions if that toggle is off.
+Load **`unpacked/`** as an unpacked extension at `chrome://extensions` (enable
+Developer Mode → "Load unpacked"). Do not load `extension/` — Chrome already
+has two leftover IDs for that folder, which is why SnapClip vanishes on
+restart. Leave Developer Mode on.
 
-Do **not** add a `key` to `manifest.json` while testing unpacked. A leftover
-`key` made Chrome register SnapClip twice for the same folder, so it vanished
-on every browser restart. Chrome now derives a stable ID from this folder path
-(`cibfbcjggdbgdmllckalpjjicpoioheb`). Do not move or rename `extension/`
-without reinstalling the native companion.
+After copying changes from `extension/` into `unpacked/`, reload the extension.
+Expected ID for `unpacked/` on this machine:
+`lghlilkcfmckhgikebafnmiimkhbofpc`.
 
 ## Native companion — back-to-back screenshot capture
 

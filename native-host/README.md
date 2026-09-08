@@ -67,11 +67,12 @@ Then **fully quit and reopen your browser** (or reload SnapClip at
 `chrome://extensions`). The extension auto-connects; the header dot turns green
 when the companion is linked.
 
-> The host allows extension IDs `cibfbcjggdbgdmllckalpjjicpoioheb`
-> (unpacked from this `extension/` folder) and the older keyed ID
-> `doeoikmjihhhbemlbkjohmlmcdjffoel`. If you move the folder, reload unpacked
-> and check the ID on `chrome://extensions`, then add that origin here and
-> re-run the installer.
+> The host allows:
+> `lghlilkcfmckhgikebafnmiimkhbofpc` (`unpacked/` on this machine),
+> `cibfbcjggdbgdmllckalpjjicpoioheb` (old `extension/` path), and
+> `doeoikmjihhhbemlbkjohmlmcdjffoel` (legacy keyed ID).
+> If you move the folder, check the ID on `chrome://extensions`, add that
+> origin here, and re-run the installer.
 
 ## Verify
 
