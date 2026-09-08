@@ -1,5 +1,152 @@
 const DEFAULT_SETTINGS = { maxScreenshots: 10, theme: 'ocean' };
 
+// ── Storage budget (chrome.storage.local is 10 MB without unlimitedStorage) ──
+// Screenshots are stored as data URLs, so a handful of large PNGs can fill the
+// quota even when the item count is under maxScreenshots. We warn in the popup
+// at 75% and drop the oldest screenshots at 80% until usage is back near 65%.
+const STORAGE_WARN_RATIO = 0.75;
+const STORAGE_CLEAN_RATIO = 0.80;
+const STORAGE_TARGET_RATIO = 0.65;
+
+let lastStorageEvent = null; // { type, removed, at } — shown once in the popup
+
+function storageQuota() {
+  return chrome.storage.local.QUOTA_BYTES || 10 * 1024 * 1024;
+}
+
+function estimateBytes(value) {
+  if (!value) return 0;
+  if (typeof value === 'string') return value.length;
+  if (typeof value === 'object' && typeof value.dataUrl === 'string') return value.dataUrl.length;
+  try { return JSON.stringify(value).length; } catch { return 0; }
+}
+
+function isQuotaError(err) {
+  return /quota/i.test(String(err && err.message ? err.message : err || ''));
+}
+
+async function getBytesInUse() {
+  try {
+    if (typeof chrome.storage.local.getBytesInUse === 'function') {
+      return await chrome.storage.local.getBytesInUse(null);
+    }
+  } catch { /* fall through */ }
+  return 0;
+}
+
+function formatMb(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1);
+}
+
+function storageLevel(percent) {
+  if (percent >= STORAGE_CLEAN_RATIO) return 'critical';
+  if (percent >= STORAGE_WARN_RATIO) return 'warn';
+  return 'ok';
+}
+
+async function measureStorage() {
+  const bytesInUse = await getBytesInUse();
+  const quotaBytes = storageQuota();
+  const percent = quotaBytes ? bytesInUse / quotaBytes : 0;
+  const level = storageLevel(percent);
+  const status = {
+    bytesInUse,
+    quotaBytes,
+    percent,
+    level,
+    usedLabel: `${formatMb(bytesInUse)} / ${formatMb(quotaBytes)} MB`,
+    lastEvent: lastStorageEvent
+  };
+  if (level === 'critical') {
+    status.message = `Storage is almost full (${status.usedLabel}). Oldest screenshots are being removed so new ones can still save.`;
+  } else if (level === 'warn') {
+    status.message = `Storage is ${Math.round(percent * 100)}% full (${status.usedLabel}). Older screenshots will be removed automatically when it fills up.`;
+  } else if (lastStorageEvent && lastStorageEvent.type === 'cleanup') {
+    const n = lastStorageEvent.removed;
+    status.message = `Freed space — removed ${n} older screenshot${n === 1 ? '' : 's'}. Using ${status.usedLabel}.`;
+    status.level = 'info';
+  } else {
+    status.message = '';
+  }
+  return status;
+}
+
+function publishStorageStatus(status) {
+  chrome.runtime.sendMessage({ type: 'STORAGE_STATUS', status }).catch(() => {});
+}
+
+async function refreshStorageStatus() {
+  const status = await measureStorage();
+  publishStorageStatus(status);
+  return status;
+}
+
+function oldestDroppableIndex(shots, keepId) {
+  for (let i = shots.length - 1; i >= 0; i--) {
+    if (keepId && shots[i].id === keepId) continue;
+    return i;
+  }
+  return -1;
+}
+
+// Drop oldest screenshots until used + needBytes is under the target ratio.
+// Writes directly (not through persistLocal) so a quota retry cannot recurse.
+async function reclaimStorage({ needBytes = 0, keepId = null } = {}) {
+  const quota = storageQuota();
+  const target = quota * STORAGE_TARGET_RATIO;
+  let totalRemoved = 0;
+
+  for (let pass = 0; pass < 8; pass++) {
+    let used = await getBytesInUse();
+    if (used + needBytes <= target) break;
+    if (pass === 0 && used + needBytes <= quota * STORAGE_CLEAN_RATIO) {
+      return { removed: 0, bytesInUse: used };
+    }
+
+    let shots = await getScreenshots();
+    let removedThis = 0;
+    while (shots.length && used + needBytes > target) {
+      const idx = oldestDroppableIndex(shots, keepId);
+      if (idx < 0) break;
+      const victim = shots.splice(idx, 1)[0];
+      used = Math.max(0, used - estimateBytes(victim));
+      removedThis += 1;
+    }
+    if (!removedThis) break;
+    await chrome.storage.local.set({ screenshots: shots });
+    totalRemoved += removedThis;
+  }
+
+  if (totalRemoved) {
+    lastStorageEvent = { type: 'cleanup', removed: totalRemoved, at: Date.now() };
+  }
+  return { removed: totalRemoved, bytesInUse: await getBytesInUse() };
+}
+
+async function ensureStorageRoom(needBytes = 0, keepId = null) {
+  const used = await getBytesInUse();
+  const quota = storageQuota();
+  if (used + needBytes <= quota * STORAGE_CLEAN_RATIO) return { removed: 0 };
+  return reclaimStorage({ needBytes, keepId });
+}
+
+async function persistLocal(data) {
+  try {
+    await chrome.storage.local.set(data);
+    return;
+  } catch (err) {
+    if (!isQuotaError(err)) throw err;
+    await reclaimStorage({ needBytes: 0 });
+    await chrome.storage.local.set(data);
+  }
+}
+
+async function enforceStorageBudget() {
+  const cleaned = await ensureStorageRoom(0);
+  const status = await refreshStorageStatus();
+  return { cleaned, status };
+}
+
 // ── Native companion (clipboard monitor) ────────────────────────────────────
 // The Swift native host watches the OS clipboard even when the browser isn't
 // focused and streams images here over Native Messaging. Large images are sent
@@ -93,16 +240,22 @@ function handleNativeMessage(msg) {
   // 'hello' / 'heartbeat' are keep-alive only; nothing to do.
 }
 
-// Keep the connection resilient across service-worker restarts.
-chrome.runtime.onStartup.addListener(connectNative);
-chrome.runtime.onInstalled.addListener(connectNative);
+function boot() {
+  connectNative();
+  enforceStorageBudget().catch(() => {});
+}
+
+// Keep the connection resilient across service-worker restarts, and reclaim
+// storage if a previous session already sat over the quota.
+chrome.runtime.onStartup.addListener(boot);
+chrome.runtime.onInstalled.addListener(boot);
 if (chrome.alarms) {
   chrome.alarms.create('snapclip-native-keepalive', { periodInMinutes: 1 });
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'snapclip-native-keepalive' && !nativePort) connectNative();
   });
 }
-connectNative();
+boot();
 
 const viewerWindowsByShot = new Map();
 
@@ -280,6 +433,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'SAVE_SETTINGS':
       saveSettings(message.settings).then(sendResponse);
       return true;
+    case 'GET_STORAGE_STATUS':
+      enforceStorageBudget().then(({ status }) => sendResponse(status));
+      return true;
+    case 'ACK_STORAGE_EVENT':
+      lastStorageEvent = null;
+      measureStorage().then(sendResponse);
+      return true;
     case 'GET_NATIVE_STATUS':
       sendResponse({ connected: nativeConnected });
       return false;
@@ -302,27 +462,28 @@ async function getSettings() {
 }
 
 async function saveSettings(settings) {
-  await chrome.storage.local.set({ settings });
+  await persistLocal({ settings });
   // Trim existing lists if the new limit is lower.
   const screenshots = await getScreenshots();
   if (screenshots.length > settings.maxScreenshots) {
-    await chrome.storage.local.set({ screenshots: screenshots.slice(0, settings.maxScreenshots) });
+    await persistLocal({ screenshots: screenshots.slice(0, settings.maxScreenshots) });
   }
   const texts = await getTexts();
   const trimmedTexts = trimPinAware(texts, settings.maxScreenshots);
   if (trimmedTexts.length !== texts.length) {
-    await chrome.storage.local.set({ texts: trimmedTexts });
+    await persistLocal({ texts: trimmedTexts });
   }
   const bookmarks = await getBookmarks();
   const trimmedBookmarks = trimPinAware(bookmarks, settings.maxScreenshots);
   if (trimmedBookmarks.length !== bookmarks.length) {
-    await chrome.storage.local.set({ bookmarks: trimmedBookmarks });
+    await persistLocal({ bookmarks: trimmedBookmarks });
   }
   const quickNotes = await getQuickNotes();
   const trimmedQuickNotes = trimPinAware(quickNotes, settings.maxScreenshots);
   if (trimmedQuickNotes.length !== quickNotes.length) {
-    await chrome.storage.local.set({ quickNotes: trimmedQuickNotes });
+    await persistLocal({ quickNotes: trimmedQuickNotes });
   }
+  await enforceStorageBudget();
   return { success: true };
 }
 
@@ -347,6 +508,16 @@ async function doSaveScreenshot(dataUrl) {
   if (Date.now() < clipboardSuppressUntil) {
     return { success: false, reason: 'suppressed' };
   }
+
+  const extraBytes = estimateBytes(dataUrl);
+  const quota = storageQuota();
+  if (extraBytes >= quota * 0.95) {
+    const storage = await refreshStorageStatus();
+    return { success: false, reason: 'too_large', storage };
+  }
+
+  await ensureStorageRoom(extraBytes);
+
   const settings = await getSettings();
   const screenshots = await getScreenshots();
 
@@ -367,13 +538,30 @@ async function doSaveScreenshot(dataUrl) {
     screenshots.splice(settings.maxScreenshots);
   }
 
-  await chrome.storage.local.set({ screenshots });
-  return { success: true, id: entry.id, entry };
+  try {
+    await persistLocal({ screenshots });
+  } catch (err) {
+    if (!isQuotaError(err)) throw err;
+    await reclaimStorage({ needBytes: extraBytes, keepId: entry.id });
+    const remaining = await getScreenshots();
+    const next = remaining.some(s => s.id === entry.id)
+      ? remaining
+      : [entry, ...remaining];
+    try {
+      await chrome.storage.local.set({ screenshots: next });
+    } catch {
+      const storage = await refreshStorageStatus();
+      return { success: false, reason: 'quota', storage };
+    }
+  }
+
+  const storage = await refreshStorageStatus();
+  return { success: true, id: entry.id, entry, storage };
 }
 
 async function deleteScreenshot(id) {
   const screenshots = await getScreenshots();
-  await chrome.storage.local.set({ screenshots: screenshots.filter(s => s.id !== id) });
+  await persistLocal({ screenshots: screenshots.filter(s => s.id !== id) });
   return { success: true };
 }
 
@@ -382,7 +570,7 @@ async function deleteScreenshots(ids) {
   const screenshots = await getScreenshots();
   const before = screenshots.length;
   const next = screenshots.filter(s => !idSet.has(s.id));
-  await chrome.storage.local.set({ screenshots: next });
+  await persistLocal({ screenshots: next });
   return { success: true, deleted: before - next.length };
 }
 
@@ -394,7 +582,7 @@ async function restoreScreenshots(items) {
   const toAdd = items.filter(i => !existing.has(i.id));
   const merged = [...toAdd, ...screenshots];
   const capped = merged.slice(0, settings.maxScreenshots);
-  await chrome.storage.local.set({ screenshots: capped });
+  await persistLocal({ screenshots: capped });
   return { success: true, restored: toAdd.length };
 }
 
@@ -403,12 +591,13 @@ async function updateScreenshot(id, patch) {
   const idx = screenshots.findIndex(s => s.id === id);
   if (idx === -1) return { success: false, reason: 'not_found' };
   screenshots[idx] = { ...screenshots[idx], ...patch };
-  await chrome.storage.local.set({ screenshots });
+  await persistLocal({ screenshots });
   return { success: true };
 }
 
 async function clearAll() {
-  await chrome.storage.local.set({ screenshots: [] });
+  await persistLocal({ screenshots: [] });
+  await refreshStorageStatus();
   return { success: true };
 }
 
@@ -463,13 +652,13 @@ async function doSaveText(text) {
   // Keep every pinned entry, plus the newest `max` unpinned ones.
   const trimmed = trimPinAware(texts, settings.maxScreenshots);
 
-  await chrome.storage.local.set({ texts: trimmed });
+  await persistLocal({ texts: trimmed });
   return { success: true, id: entry.id, entry };
 }
 
 async function deleteText(id) {
   const texts = await getTexts();
-  await chrome.storage.local.set({ texts: texts.filter(t => t.id !== id) });
+  await persistLocal({ texts: texts.filter(t => t.id !== id) });
   return { success: true };
 }
 
@@ -478,7 +667,7 @@ async function deleteTexts(ids) {
   const texts = await getTexts();
   const before = texts.length;
   const next = texts.filter(t => !idSet.has(t.id));
-  await chrome.storage.local.set({ texts: next });
+  await persistLocal({ texts: next });
   return { success: true, deleted: before - next.length };
 }
 
@@ -489,7 +678,7 @@ async function restoreTexts(items) {
   const existing = new Set(texts.map(t => t.id));
   const toAdd = items.filter(i => !existing.has(i.id));
   const merged = [...toAdd, ...texts];
-  await chrome.storage.local.set({ texts: trimPinAware(merged, settings.maxScreenshots) });
+  await persistLocal({ texts: trimPinAware(merged, settings.maxScreenshots) });
   return { success: true, restored: toAdd.length };
 }
 
@@ -501,14 +690,14 @@ async function toggleTextPin(id) {
   const pinned = !Boolean(texts[idx].pinned);
   texts = texts.map(t => t.id === id ? { ...t, pinned } : t);
   texts = trimPinAware(texts, settings.maxScreenshots);
-  await chrome.storage.local.set({ texts });
+  await persistLocal({ texts });
   return { success: true, pinned };
 }
 
 // Clears only unpinned texts — pinned ones are kept on purpose.
 async function clearTexts() {
   const texts = await getTexts();
-  await chrome.storage.local.set({ texts: texts.filter(t => t.pinned) });
+  await persistLocal({ texts: texts.filter(t => t.pinned) });
   return { success: true };
 }
 
@@ -558,7 +747,7 @@ async function doSaveBookmark(url) {
   bookmarks.unshift(entry);
   const trimmed = trimPinAware(bookmarks, settings.maxScreenshots);
 
-  await chrome.storage.local.set({ bookmarks: trimmed });
+  await persistLocal({ bookmarks: trimmed });
   fetchLinkPreview(entry.id, value);
   return { success: true, id: entry.id, entry };
 }
@@ -579,7 +768,7 @@ async function patchBookmark(id, patch) {
   const idx = bookmarks.findIndex(b => b.id === id);
   if (idx === -1) return { success: false, reason: 'not_found' };
   bookmarks[idx] = { ...bookmarks[idx], ...patch };
-  await chrome.storage.local.set({ bookmarks });
+  await persistLocal({ bookmarks });
   return { success: true };
 }
 
@@ -611,7 +800,7 @@ async function fetchLinkPreview(id, url) {
 
 async function deleteBookmark(id) {
   const bookmarks = await getBookmarks();
-  await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.id !== id) });
+  await persistLocal({ bookmarks: bookmarks.filter(b => b.id !== id) });
   return { success: true };
 }
 
@@ -620,7 +809,7 @@ async function deleteBookmarks(ids) {
   const bookmarks = await getBookmarks();
   const before = bookmarks.length;
   const next = bookmarks.filter(b => !idSet.has(b.id));
-  await chrome.storage.local.set({ bookmarks: next });
+  await persistLocal({ bookmarks: next });
   return { success: true, deleted: before - next.length };
 }
 
@@ -631,7 +820,7 @@ async function restoreBookmarks(items) {
   const existing = new Set(bookmarks.map(b => b.id));
   const toAdd = items.filter(i => !existing.has(i.id));
   const merged = [...toAdd, ...bookmarks];
-  await chrome.storage.local.set({ bookmarks: trimPinAware(merged, settings.maxScreenshots) });
+  await persistLocal({ bookmarks: trimPinAware(merged, settings.maxScreenshots) });
   return { success: true, restored: toAdd.length };
 }
 
@@ -641,14 +830,14 @@ async function toggleBookmarkPin(id) {
   bookmarks = bookmarks.map(b => b.id === id ? { ...b, pinned: !b.pinned } : b);
   // Unpinning can push the list back over the cap, so re-trim.
   bookmarks = trimPinAware(bookmarks, settings.maxScreenshots);
-  await chrome.storage.local.set({ bookmarks });
+  await persistLocal({ bookmarks });
   return { success: true };
 }
 
 // Clears only unpinned bookmarks — pinned ones are kept on purpose.
 async function clearBookmarks() {
   const bookmarks = await getBookmarks();
-  await chrome.storage.local.set({ bookmarks: bookmarks.filter(b => b.pinned) });
+  await persistLocal({ bookmarks: bookmarks.filter(b => b.pinned) });
   return { success: true };
 }
 
@@ -682,7 +871,7 @@ async function doSaveQuickNote(title, text) {
   };
 
   quickNotes.unshift(entry);
-  await chrome.storage.local.set({ quickNotes: trimPinAware(quickNotes, settings.maxScreenshots) });
+  await persistLocal({ quickNotes: trimPinAware(quickNotes, settings.maxScreenshots) });
   return { success: true, id: entry.id, entry };
 }
 
@@ -701,13 +890,13 @@ async function updateQuickNote(id, patch) {
     text: nextText,
     updatedAt: Date.now()
   };
-  await chrome.storage.local.set({ quickNotes });
+  await persistLocal({ quickNotes });
   return { success: true, entry: quickNotes[idx] };
 }
 
 async function deleteQuickNote(id) {
   const quickNotes = await getQuickNotes();
-  await chrome.storage.local.set({ quickNotes: quickNotes.filter(n => n.id !== id) });
+  await persistLocal({ quickNotes: quickNotes.filter(n => n.id !== id) });
   return { success: true };
 }
 
@@ -716,7 +905,7 @@ async function deleteQuickNotes(ids) {
   const quickNotes = await getQuickNotes();
   const before = quickNotes.length;
   const next = quickNotes.filter(n => !idSet.has(n.id));
-  await chrome.storage.local.set({ quickNotes: next });
+  await persistLocal({ quickNotes: next });
   return { success: true, deleted: before - next.length };
 }
 
@@ -727,7 +916,7 @@ async function restoreQuickNotes(items) {
   const existing = new Set(quickNotes.map(n => n.id));
   const toAdd = items.filter(i => !existing.has(i.id));
   const merged = [...toAdd, ...quickNotes];
-  await chrome.storage.local.set({ quickNotes: trimPinAware(merged, settings.maxScreenshots) });
+  await persistLocal({ quickNotes: trimPinAware(merged, settings.maxScreenshots) });
   return { success: true, restored: toAdd.length };
 }
 
@@ -739,13 +928,13 @@ async function toggleQuickNotePin(id) {
   const pinned = !Boolean(quickNotes[idx].pinned);
   quickNotes = quickNotes.map(n => n.id === id ? { ...n, pinned } : n);
   quickNotes = trimPinAware(quickNotes, settings.maxScreenshots);
-  await chrome.storage.local.set({ quickNotes });
+  await persistLocal({ quickNotes });
   return { success: true, pinned };
 }
 
 async function clearQuickNotes() {
   const quickNotes = await getQuickNotes();
-  await chrome.storage.local.set({ quickNotes: quickNotes.filter(n => n.pinned) });
+  await persistLocal({ quickNotes: quickNotes.filter(n => n.pinned) });
   return { success: true };
 }
 
@@ -775,12 +964,12 @@ async function doAddNote(date, text) {
     createdAt: Date.now()
   };
   notes.push(entry);
-  await chrome.storage.local.set({ notes });
+  await persistLocal({ notes });
   return { success: true, id: entry.id, entry };
 }
 
 async function deleteNote(id) {
   const notes = await getNotes();
-  await chrome.storage.local.set({ notes: notes.filter(n => n.id !== id) });
+  await persistLocal({ notes: notes.filter(n => n.id !== id) });
   return { success: true };
 }

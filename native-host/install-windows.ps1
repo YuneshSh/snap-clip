@@ -6,7 +6,10 @@ $Dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $HostName = "com.snapclip.clipboard"
 $Launcher = Join-Path $Dir "run-host.bat"
 $ManifestFile = Join-Path $Dir "$HostName.json"
-$ExtensionOrigin = "chrome-extension://doeoikmjihhhbemlbkjohmlmcdjffoel/"
+$ExtensionOrigins = @(
+  "chrome-extension://cibfbcjggdbgdmllckalpjjicpoioheb/",
+  "chrome-extension://doeoikmjihhhbemlbkjohmlmcdjffoel/"
+)
 
 function Invoke-Python {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
@@ -29,7 +32,7 @@ $manifest = @{
   description      = "SnapClip clipboard monitor"
   path             = $Launcher
   type             = "stdio"
-  allowed_origins  = @($ExtensionOrigin)
+  allowed_origins  = $ExtensionOrigins
 } | ConvertTo-Json -Compress
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false

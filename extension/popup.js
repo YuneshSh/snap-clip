@@ -57,6 +57,12 @@ const pinnedCount    = $('pinnedCount');
 const pinnedTitle    = $('pinnedTitle');
 const toastMsg       = $('toastMsg');
 const toastAction    = $('toastAction');
+const storageBanner  = $('storageBanner');
+const storageBannerMsg = $('storageBannerMsg');
+const storageBannerDismiss = $('storageBannerDismiss');
+const storageMeter   = $('storageMeter');
+const storageMeterFill = $('storageMeterFill');
+const storageMeterLabel = $('storageMeterLabel');
 const textSearchInput= $('textSearchInput');
 const textSortSelect = $('textSortSelect');
 const textSelectBtn  = $('textSelectBtn');
@@ -178,11 +184,13 @@ lockPopupSize();
 
   // Reflect the native companion's connection state in the header.
   send('GET_NATIVE_STATUS').then(res => setNativeStatus(res && res.connected));
+  send('GET_STORAGE_STATUS').then(applyStorageStatus).catch(() => {});
 })();
 
 // Live updates pushed by the background service worker.
 chrome.runtime.onMessage.addListener(msg => {
   if (msg && msg.type === 'NATIVE_STATUS') setNativeStatus(msg.connected);
+  if (msg && msg.type === 'STORAGE_STATUS') applyStorageStatus(msg.status);
 });
 
 // Keep the lists in sync whenever storage changes (captures from the native
@@ -212,7 +220,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderTicker();
   }
   if (changes.texts || changes.bookmarks || changes.quickNotes) updatePinnedDrawer();
-  if (changes.screenshots || changes.texts || changes.bookmarks || changes.quickNotes) updateCountBadge();
+  if (changes.screenshots || changes.texts || changes.bookmarks || changes.quickNotes) {
+    updateCountBadge();
+    send('GET_STORAGE_STATUS').then(applyStorageStatus).catch(() => {});
+  }
 });
 
 // ── Tabs ────────────────────────────────────────────────────────────────────
@@ -259,6 +270,43 @@ function setNativeStatus(connected) {
   statusDot.title = connected
     ? 'Companion connected — capturing screenshots system-wide'
     : 'Companion not connected — open the popup to capture, or install the native host (see native-host/README.md)';
+}
+
+let storageDismissedLevel = null;
+
+function applyStorageStatus(status) {
+  if (!status) return;
+  const pct = Math.min(100, Math.max(0, Math.round((status.percent || 0) * 100)));
+  if (storageMeterFill) storageMeterFill.style.width = `${pct}%`;
+  if (storageMeterLabel) storageMeterLabel.textContent = status.usedLabel || `${pct}%`;
+  if (storageMeter) storageMeter.dataset.level = status.level || 'ok';
+
+  if (!storageBanner) return;
+  const level = status.level || 'ok';
+  const rank = { ok: 0, info: 1, warn: 2, critical: 3 };
+  if (storageDismissedLevel && (rank[level] || 0) <= (rank[storageDismissedLevel] || 0)) {
+    storageBanner.hidden = true;
+    storageBanner.classList.remove('visible');
+    return;
+  }
+  storageDismissedLevel = null;
+
+  const show = Boolean(status.message) && level !== 'ok';
+  storageBanner.hidden = !show;
+  storageBanner.classList.toggle('visible', show);
+  storageBanner.dataset.level = level;
+  if (storageBannerMsg) storageBannerMsg.textContent = status.message || '';
+}
+
+if (storageBannerDismiss) {
+  storageBannerDismiss.addEventListener('click', () => {
+    storageDismissedLevel = storageBanner.dataset.level || 'info';
+    storageBanner.hidden = true;
+    storageBanner.classList.remove('visible');
+    if (storageDismissedLevel === 'info') {
+      send('ACK_STORAGE_EVENT').catch(() => {});
+    }
+  });
 }
 
 // The clipboard read can be rejected if it fires before the popup has focus, so
@@ -696,9 +744,21 @@ async function captureFromClipboard({ userInitiated }) {
 
       if (result && result.success) {
         // storage.onChanged renders the new card.
-        showToast('Screenshot added from clipboard');
+        if (result.storage && result.storage.lastEvent && result.storage.lastEvent.type === 'cleanup') {
+          const n = result.storage.lastEvent.removed;
+          showToast(`Saved — removed ${n} older screenshot${n === 1 ? '' : 's'} to free space`, { duration: 3200 });
+        } else {
+          showToast('Screenshot added from clipboard');
+        }
+        if (result.storage) applyStorageStatus(result.storage);
       } else if (result && result.reason === 'duplicate') {
         if (userInitiated) showToast('That screenshot is already saved');
+      } else if (result && result.reason === 'too_large') {
+        showToast('That screenshot is too large to save (over 10 MB)');
+        if (result.storage) applyStorageStatus(result.storage);
+      } else if (result && result.reason === 'quota') {
+        showToast('Storage is full — older screenshots were removed, try again');
+        if (result.storage) applyStorageStatus(result.storage);
       }
       break;
     }

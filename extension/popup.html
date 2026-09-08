@@ -40,6 +40,19 @@
       </div>
     </header>
 
+    <!-- Storage budget notice -->
+    <div class="storage-banner" id="storageBanner" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span id="storageBannerMsg"></span>
+      <button type="button" class="storage-banner-dismiss" id="storageBannerDismiss" aria-label="Dismiss">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
     <!-- Today's reminders ticker -->
     <div class="ticker" id="ticker" hidden>
       <svg class="ticker-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -96,6 +109,14 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
           </div>
+        </div>
+        <div class="setting-row setting-row-col">
+          <label class="setting-label">Storage</label>
+          <div class="storage-meter" id="storageMeter" title="Chrome extension storage">
+            <div class="storage-meter-bar"><span id="storageMeterFill"></span></div>
+            <span class="storage-meter-label" id="storageMeterLabel">—</span>
+          </div>
+          <p class="storage-meter-hint">Oldest screenshots are removed automatically when this fills up (10 MB limit).</p>
         </div>
         <div class="setting-row setting-row-col">
           <label class="setting-label">Accent color</label>

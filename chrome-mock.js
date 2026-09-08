@@ -22,17 +22,25 @@ const _store = (() => {
       arr.forEach(k => { if (k in d) out[k] = d[k]; });
       return Promise.resolve(out);
     },
-    set(data) {
-      const d = load();
-      const changes = {};
-      for (const k of Object.keys(data)) {
-        changes[k] = { oldValue: d[k], newValue: data[k] };
-      }
-      Object.assign(d, data);
-      dump(d);
-      _onChangedListeners.forEach(fn => { try { fn(changes, 'local'); } catch { /* ignore */ } });
-      return Promise.resolve();
-    },
+        set(data) {
+          const d = load();
+          const changes = {};
+          for (const k of Object.keys(data)) {
+            changes[k] = { oldValue: d[k], newValue: data[k] };
+          }
+          Object.assign(d, data);
+          dump(d);
+          _onChangedListeners.forEach(fn => { try { fn(changes, 'local'); } catch { /* ignore */ } });
+          return Promise.resolve();
+        },
+        getBytesInUse() {
+          try {
+            return Promise.resolve(JSON.stringify(load()).length);
+          } catch {
+            return Promise.resolve(0);
+          }
+        },
+        QUOTA_BYTES: 10 * 1024 * 1024,
   };
 })();
 
@@ -479,6 +487,16 @@ window.chrome = {
         case 'DELETE_NOTE':       return bgDeleteNote(msg.id);
         // Preview showcases the companion as connected.
         case 'GET_NATIVE_STATUS': return Promise.resolve({ connected: true });
+        case 'GET_STORAGE_STATUS':
+          return Promise.resolve({
+            bytesInUse: 0, quotaBytes: 10 * 1024 * 1024, percent: 0, level: 'ok',
+            usedLabel: '0.0 / 10.0 MB', message: '', lastEvent: null
+          });
+        case 'ACK_STORAGE_EVENT':
+          return Promise.resolve({
+            bytesInUse: 0, quotaBytes: 10 * 1024 * 1024, percent: 0, level: 'ok',
+            usedLabel: '0.0 / 10.0 MB', message: '', lastEvent: null
+          });
         case 'OPEN_VIEWER': {
           const w = Math.min(Math.max(msg.width || 1200, 640), 1600);
           const h = Math.min(Math.max(msg.height || 860, 480), 1200);

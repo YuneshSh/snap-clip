@@ -67,8 +67,11 @@ Then **fully quit and reopen your browser** (or reload SnapClip at
 `chrome://extensions`). The extension auto-connects; the header dot turns green
 when the companion is linked.
 
-> The manifest is locked to extension ID `doeoikmjihhhbemlbkjohmlmcdjffoel`
-> (pinned in `extension/manifest.json`).
+> The host allows extension IDs `cibfbcjggdbgdmllckalpjjicpoioheb`
+> (unpacked from this `extension/` folder) and the older keyed ID
+> `doeoikmjihhhbemlbkjohmlmcdjffoel`. If you move the folder, reload unpacked
+> and check the ID on `chrome://extensions`, then add that origin here and
+> re-run the installer.
 
 ## Verify
 
