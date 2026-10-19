@@ -1,0 +1,54 @@
+name: companion-windows
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native-host/snapclip-clipboard-host.py'
+      - 'native-host/requirements.txt'
+      - 'native-host/windows/**'
+      - '.github/workflows/companion-windows.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build exe
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File native-host/windows/build-exe.ps1
+
+      - name: Package ZIP
+        shell: bash
+        run: |
+          chmod +x native-host/windows/build-release.sh
+          ./native-host/windows/build-release.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnapClip-Companion-Windows
+          path: native-host/windows/dist/SnapClip-Companion-Windows.zip
+
+      - name: Attach to latest companion release (if tagged release exists)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view companion-macos-v1.0.0 >/dev/null 2>&1; then
+            gh release upload companion-macos-v1.0.0 \
+              native-host/windows/dist/SnapClip-Companion-Windows.zip \
+              --clobber
+          else
+            echo "No companion-macos-v1.0.0 release yet — ZIP uploaded as workflow artifact only."
+          fi

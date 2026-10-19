@@ -4,6 +4,8 @@
   "path": "__HOST_PATH__",
   "type": "stdio",
   "allowed_origins": [
+    "chrome-extension://felceegmoadjlpodhpdpcpiidgafnlid/",
+    "chrome-extension://lklehcjpnlhnghobjoldmfdeobjcnoej/",
     "chrome-extension://lghlilkcfmckhgikebafnmiimkhbofpc/",
     "chrome-extension://cibfbcjggdbgdmllckalpjjicpoioheb/",
     "chrome-extension://doeoikmjihhhbemlbkjohmlmcdjffoel/"

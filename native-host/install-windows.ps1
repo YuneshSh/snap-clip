@@ -7,6 +7,8 @@ $HostName = "com.snapclip.clipboard"
 $Launcher = Join-Path $Dir "run-host.bat"
 $ManifestFile = Join-Path $Dir "$HostName.json"
 $ExtensionOrigins = @(
+  "chrome-extension://felceegmoadjlpodhpdpcpiidgafnlid/",
+  "chrome-extension://lklehcjpnlhnghobjoldmfdeobjcnoej/",
   "chrome-extension://lghlilkcfmckhgikebafnmiimkhbofpc/",
   "chrome-extension://cibfbcjggdbgdmllckalpjjicpoioheb/",
   "chrome-extension://doeoikmjihhhbemlbkjohmlmcdjffoel/"
