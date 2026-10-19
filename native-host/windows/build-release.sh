@@ -51,14 +51,45 @@ If snapclip-clipboard-host.exe is in this folder, Python is NOT required.
 Otherwise install Python 3.9+ from python.org (Add to PATH).
 EOF
 
+# Prefer Info-ZIP; fall back to Python (Windows runners often lack `zip`).
+make_zip() {
+  local out="$1"
+  if command -v zip >/dev/null 2>&1; then
+    zip -qr "$out" .
+    return
+  fi
+  python - "$out" <<'PY'
+import sys, zipfile
+from pathlib import Path
+out = Path(sys.argv[1])
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    for path in Path(".").rglob("*"):
+        if path.is_file():
+            zf.write(path, path.as_posix())
+PY
+}
+
 (
   cd "$STAGE"
-  zip -qr "$DIST/$ZIP_NAME" .
+  make_zip "$DIST/$ZIP_NAME"
 )
 cp "$DIST/$ZIP_NAME" "$DIST/${PRODUCT}.zip"
 (
   cd "$DIST"
-  shasum -a 256 "$ZIP_NAME" "${PRODUCT}.zip" > SHA256SUMS.txt
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$ZIP_NAME" "${PRODUCT}.zip" > SHA256SUMS.txt
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$ZIP_NAME" "${PRODUCT}.zip" > SHA256SUMS.txt
+  else
+    python - "$ZIP_NAME" "${PRODUCT}.zip" <<'PY'
+import hashlib, pathlib, sys
+lines = []
+for name in sys.argv[1:]:
+    data = pathlib.Path(name).read_bytes()
+    lines.append(f"{hashlib.sha256(data).hexdigest()}  {name}")
+pathlib.Path("SHA256SUMS.txt").write_text("\n".join(lines) + "\n")
+PY
+  fi
 )
 
 echo ""
